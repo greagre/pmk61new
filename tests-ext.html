@@ -1,0 +1,458 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ext61 — тесты</title>
+<style>
+  body { font-family: system-ui, -apple-system, sans-serif; padding: 16px; line-height: 1.5; max-width: 760px; }
+  h1 { font-size: 1.25rem; }
+  ol { padding-left: 1.1rem; }
+  li { margin: 5px 0; }
+  .ok { color: #1a7f37; }
+  .fail { color: #b42318; font-weight: 600; }
+  .sum { margin-top: 16px; padding: 10px 12px; border-radius: 8px; background: #f4f4f4; font-weight: 600; }
+  .sum.bad { background: #fdecea; }
+  .note { color: #555; font-size: 0.9rem; }
+  code { font-family: ui-monospace, monospace; }
+</style>
+</head>
+<body>
+<h1>ext61 — тесты расширения</h1>
+<p>Открывать прямо из папки проекта: нужны <code>profiles.js</code>, <code>core.js</code>, <code>ext61.js</code>.</p>
+<p class="note">Версии в ссылках (<code>?v=12</code>) нужны, чтобы браузер не подсовывал старые копии скриптов. Меняй цифру при каждой правке ядра или расширения.</p>
+<ol id="out"></ol>
+<script src="profiles.js?v=14"></script>
+<script src="core.js?v=14"></script>
+<script src="ext61.js?v=12"></script>
+<script>
+(function () {
+  var out = document.getElementById('out');
+  var pass = 0, fail = 0;
+
+  function check(name, ok, info) {
+    var li = document.createElement('li');
+    li.className = ok ? 'ok' : 'fail';
+    li.textContent = (ok ? '\u2714 ' : '\u2718 ') + name + (info ? ' \u2014 ' + info : '');
+    out.appendChild(li);
+    if (ok) pass++; else fail++;
+  }
+
+  function fresh() { return MKExt61.create({}); }
+
+  /* ---------- 0. свежесть загруженного ext61.js ----------
+     Если браузер отдал старую копию, дальше пойдут загадочные
+     провалы. Поэтому первым делом проверяем, что в файле есть
+     страницы и банк-адресат. */
+  (function () {
+    if (typeof MKExt61 === 'undefined' || typeof MKExt61.create !== 'function') {
+      check('свежая копия ext61.js', false, 'ext61.js не загрузился вовсе');
+      return;
+    }
+    var m = fresh();
+    var ok = typeof m.selectPage === 'function' &&
+             typeof m.page === 'function' &&
+             typeof m.setTargetBank === 'function' &&
+             typeof m.targetBank === 'function' &&
+             typeof m.homePage === 'function' &&
+             m.PAGES === 4;
+    check('свежая копия ext61.js (страницы, банк-адресат)',
+          ok,
+          ok ? 'PAGES=' + m.PAGES + ', функции на месте'
+             : 'загружена старая копия — обнови страницу (кэш)');
+  })();
+
+  /* ---------- 1. регрессия: обычная программа без F0 ---------- */
+  (function () {
+    var m = fresh();
+    m.core.setProgram([0x02, 0x0E, 0x03, 0x10, 0x50]);   /* 2 В↑ 3 + С/П */
+    var r = m.run(1000);
+    check('МК-61 без F0: 2 + 3 = 5', r.x === 5 && r.result === 'stop', 'X=' + r.x);
+  })();
+
+  /* ---------- 2. банк 1 не видит значения банка 0 ---------- */
+  (function () {
+    var m = fresh();
+    m.core.setProgram([
+      0x05,          /* 00: 5            */
+      0x40,          /* 01: x->П 0       (банк 0) */
+      0xF0, 0x01,    /* 02: банк 1       */
+      0x60,          /* 04: П->x 0       (банк 1 = 0) */
+      0xF0, 0x00,    /* 05: банк 0       */
+      0x60,          /* 07: П->x 0       (банк 0 = 5) */
+      0x50           /* 08: С/П           */
+    ]);
+    var r = m.run(1000);
+    check('банки изолированы', r.x === 5 && m.ST.Y === 0,
+          'X=' + r.x + ', Y=' + m.ST.Y);
+  })();
+
+  /* ---------- 3. запись в разные банки не затирает друг друга ---------- */
+  (function () {
+    var m = fresh();
+    m.core.setX(7);
+    m.core.exec(0x40);            /* банк 0: RG0 = 7 */
+    m.selectBank(2);
+    var empty = (m.core.ST.R[0] === 0);
+    m.core.setX(9);
+    m.core.exec(0x40);            /* банк 2: RG0 = 9 */
+    m.selectBank(0);
+    var back0 = m.core.ST.R[0];
+    m.selectBank(2);
+    var back2 = m.core.ST.R[0];
+    check('новый банк начинается с нулей', empty, 'RG0=' + (empty ? 0 : 'не 0'));
+    check('банк 0 сохранил 7', back0 === 7, 'RG0=' + back0);
+    check('банк 2 сохранил 9', back2 === 9, 'RG0=' + back2);
+  })();
+
+  /* ---------- 4. F0 04 — номер текущего банка ---------- */
+  (function () {
+    var m = fresh();
+    m.core.setProgram([0xF0, 0x01, 0xF0, 0x04, 0x50]);
+    var r = m.run(100);
+    check('F0 04 отдаёт номер банка', r.x === 1, 'X=' + r.x);
+  })();
+
+  /* ---------- 5. F0 10 — адрес самой команды ---------- */
+  (function () {
+    var m = fresh();
+    m.core.setProgram([0x54, 0x54, 0x54, 0xF0, 0x10, 0x50]);
+    var r = m.run(100);
+    check('F0 10 отдаёт адрес команды', r.x === 3, 'X=' + r.x);
+  })();
+
+  /* ---------- 6. F0 11 — адрес следующей ячейки ---------- */
+  (function () {
+    var m = fresh();
+    m.core.setProgram([0x54, 0x54, 0xF0, 0x11, 0x50]);
+    var r = m.run(100);
+    check('F0 11 отдаёт адрес + 2', r.x === 4, 'X=' + r.x);
+  })();
+
+  /* ---------- 7. неизвестный второй байт даёт ЕГГ0Г ---------- */
+  (function () {
+    var m = fresh();
+    m.core.setProgram([0xF0, 0x99, 0x50]);
+    var r = m.run(10);
+    check('F0 99 → ЕГГ0Г', r.result === 'error' && m.core.ST.err === true, 'result=' + r.result);
+  })();
+
+  /* ---------- 8. неописанный второй байт тоже ЕГГ0Г ---------- */
+  (function () {
+    var m = fresh();
+    m.core.setProgram([0xF0, 0x30, 0x50]);
+    var r = m.run(10);
+    check('F0 30 → ЕГГ0Г', r.result === 'error', 'result=' + r.result);
+  })();
+
+  /* ---------- 9. полный сброс чистит банки ---------- */
+  (function () {
+    var m = fresh();
+    m.core.setX(5); m.core.exec(0x40);
+    m.selectBank(1);
+    m.core.setX(6); m.core.exec(0x40);
+    m.core.reset(false);
+    check('сброс чистит регистры', m.core.ST.R[0] === 0 && m.bank() === 1,
+          'RG0=' + m.core.ST.R[0] + ', банк=' + m.bank());
+  })();
+
+  /* ---------- 10. writeExt пишет две ячейки ---------- */
+  (function () {
+    var m = fresh();
+    m.core.ST.ip = 0;
+    var ok = m.writeExt(0x02);
+    check('writeExt пишет F0 и второй байт',
+          ok && m.core.ST.prog[0] === 0xF0 && m.core.ST.prog[1] === 0x02 && m.core.ST.ip === 2,
+          'prog[0]=' + m.core.ST.prog[0] + ', ip=' + m.core.ST.ip);
+  })();
+
+  /* ---------- 11. стек не ломается: F0 не двигает X ---------- */
+  (function () {
+    var m = fresh();
+    m.core.setProgram([0x07, 0xF0, 0x01, 0x50]);
+    var r = m.run(100);
+    check('переключение банка не меняет X', r.x === 7, 'X=' + r.x);
+  })();
+
+  /* ---------- 12. описание команд ---------- */
+  (function () {
+    var n = MKExt61.extName(0x01);
+    var u = MKExt61.extName(0x77);
+    var st = MKExt61.extName(0x40);
+    var pg = MKExt61.extName(0x22);
+    check('описание EXT-команд',
+          n === 'банк 1' && u === 'неизвестная EXT-команда' &&
+          st.indexOf('x→П') === 0 && pg === 'страница 2',
+          n + ' / ' + u + ' / ' + pg);
+  })();
+
+  /* ---------- 13. F0 40: запись в другой банк без переключения ---------- */
+  (function () {
+    var m = fresh();
+    m.core.setProgram([
+      0x02,          /* 00: 2                       */
+      0xF0, 0x05,    /* 01: банк-адресат = 2        */
+      0x0D,          /* 03: Cx                      */
+      0x07,          /* 04: 7                       */
+      0xF0, 0x40,    /* 05: RG0 банка 2 ← 7         */
+      0x50           /* 07: С/П                     */
+    ]);
+    var r = m.run(100);
+    var cur0 = m.core.ST.R[0];
+    var stillBank = m.bank();
+    m.selectBank(2);
+    var inBank2 = m.core.ST.R[0];
+    check('F0 40 пишет в другой банк',
+          r.x === 7 && cur0 === 0 && inBank2 === 7 && stillBank === 0,
+          'X=' + r.x + ', банк0 RG0=' + cur0 + ', банк2 RG0=' + inBank2 + ', банк=' + stillBank);
+  })();
+
+  /* ---------- 14. F0 60: чтение из другого банка ----------
+     Ядро (ревизия 7) закрывает набор числа при записи в регистр,
+     поэтому Cx между «цифра» и «x→П» больше не нужен. */
+  (function () {
+    var m = fresh();
+    m.core.setProgram([
+      0x05,          /* 00: 5                                   */
+      0x40,          /* 01: RG0 банка 0 = 5                     */
+      0xF0, 0x02,    /* 02: перейти в банк 2                    */
+      0x09,          /* 04: 9                                   */
+      0x40,          /* 05: RG0 банка 2 = 9                     */
+      0xF0, 0x00,    /* 06: вернуться в банк 0                  */
+      0x02,          /* 08: 2                                   */
+      0xF0, 0x05,    /* 09: банк-адресат = 2                    */
+      0xF0, 0x60,    /* 0B: X ← RG0 банка 2                     */
+      0x50           /* 0D: С/П                                 */
+    ]);
+    var r = m.run(200);
+    check('F0 60 читает из другого банка',
+          r.x === 9 && m.bank() === 0,
+          'X=' + r.x + ', банк=' + m.bank());
+  })();
+
+  /* ---------- 15. банк-адресат вне диапазона — ЕГГ0Г ---------- */
+  (function () {
+    var m = fresh();
+    m.core.setProgram([0x04, 0xF0, 0x05, 0x50]);   /* адресат = 4 */
+    var r = m.run(20);
+    check('адресат 4 → ЕГГ0Г', r.result === 'error', 'result=' + r.result);
+  })();
+
+  /* ---------- 16. дробный банк-адресат — ЕГГ0Г ---------- */
+  (function () {
+    var m = fresh();
+    m.core.setProgram([0x02, 0x0A, 0x05, 0xF0, 0x05, 0x50]);   /* 2.5 */
+    var r = m.run(20);
+    check('адресат 2,5 → ЕГГ0Г', r.result === 'error', 'result=' + r.result);
+  })();
+
+  /* ---------- 17. F0 06 отдаёт адресата, X не теряется ---------- */
+  (function () {
+    var m = fresh();
+    m.core.setProgram([0x03, 0xF0, 0x05, 0xF0, 0x06, 0x50]);
+    var r = m.run(50);
+    check('F0 06 отдаёт банк-адресат',
+          r.x === 3 && m.targetBank() === 3,
+          'X=' + r.x + ', адресат=' + m.targetBank());
+  })();
+
+  /* ---------- 18. F0 4F пишет в R0 другого банка (F = R0) ---------- */
+  (function () {
+    var m = fresh();
+    m.core.setProgram([
+      0x06,          /* 00: 6                        */
+      0xF0, 0x01,    /* 01: текущий банк = 1         */
+      0xF0, 0x4F,    /* 03: RG0 банка 0 ← 6          */
+      0x50           /* 05: С/П                      */
+    ]);
+    var r = m.run(50);
+    var bank1 = m.core.ST.R[0];
+    m.selectBank(0);
+    var bank0 = m.core.ST.R[0];
+    check('F0 4F = R0 нужного банка',
+          bank1 === 0 && bank0 === 6,
+          'банк1 RG0=' + bank1 + ', банк0 RG0=' + bank0);
+  })();
+
+  /* ---------- 19. полный сброс возвращает адресата в 0 ---------- */
+  (function () {
+    var m = fresh();
+    m.core.setProgram([0x02, 0xF0, 0x05, 0x50]);
+    m.run(50);
+    var before = m.targetBank();
+    m.core.reset(false);
+    check('сброс обнуляет банк-адресат',
+          before === 2 && m.targetBank() === 0,
+          'до=' + before + ', после=' + m.targetBank());
+  })();
+
+  /* ---------- 20. регрессия на баг склейки чисел ----------
+     До ревизии 7 набор числа не закрывался при x→П, и «5 x→П 0 7 x→П 1»
+     давало R1 = 57. Теперь R0 = 5, R1 = 7. */
+  (function () {
+    var m = fresh();
+    m.core.setProgram([
+      0x05,          /* 00: 5        */
+      0x40,          /* 01: x→П 0    */
+      0x07,          /* 02: 7        */
+      0x41,          /* 03: x→П 1    */
+      0x50           /* 04: С/П      */
+    ]);
+    m.run(100);
+    var r0 = m.core.ST.R[0], r1 = m.core.ST.R[1];
+    check('x→П закрывает набор: R0=5, R1=7',
+          r0 === 5 && r1 === 7,
+          'R0=' + r0 + ', R1=' + r1);
+  })();
+
+  /* ---------- 21. регрессия: чтение после этой же записи ---------- */
+  (function () {
+    var m = fresh();
+    m.core.setProgram([
+      0x05,          /* 00: 5        */
+      0x40,          /* 01: x→П 0    */
+      0x07,          /* 02: 7        */
+      0x41,          /* 03: x→П 1    */
+      0x60,          /* 04: П→x 0    */
+      0x50           /* 05: С/П      */
+    ]);
+    var r = m.run(100);
+    check('П→x 0 после двух записей даёт 5', r.x === 5, 'X=' + r.x);
+  })();
+
+  /* ---------- 22. F0 21 переключает на страницу и начинает её с нуля ---------- */
+  (function () {
+    var m = fresh();
+    m.selectPage(1);
+    m.core.setProgram([0x07, 0x0E, 0x08, 0x10, 0x50]);   /* 7 В↑ 8 + С/П = 15 */
+    m.selectPage(0);
+    m.core.setProgram([0xF0, 0x21, 0x50]);                /* переход на страницу 1 */
+    var r = m.run(100);
+    check('F0 21 исполняет программу страницы 1',
+          r.x === 15 && m.page() === 1,
+          'X=' + r.x + ', страница=' + m.page());
+  })();
+
+  /* ---------- 23. F0 24 отдаёт номер страницы ---------- */
+  (function () {
+    var m = fresh();
+    m.selectPage(3);
+    m.core.setProgram([0xF0, 0x24, 0x50]);                /* страница → X */
+    m.selectPage(0);
+    m.core.setProgram([0xF0, 0x23, 0x50]);                /* переход на страницу 3 */
+    var r = m.run(100);
+    check('F0 24 отдаёт номер страницы',
+          r.x === 3 && m.page() === 3,
+          'X=' + r.x + ', страница=' + m.page());
+  })();
+
+  /* ---------- 24. страницы не смешиваются ---------- */
+  (function () {
+    var m = fresh();
+    m.core.setProgram([0x01, 0x50]);            /* страница 0: 1 С/П */
+    m.selectPage(1);
+    m.core.setProgram([0x02, 0x50]);            /* страница 1: 2 С/П */
+    m.selectPage(0);
+    var r = m.run(50);
+    check('страницы не смешиваются', r.x === 1, 'X=' + r.x + ', страница=' + m.page());
+  })();
+
+  /* ---------- 25. полный сброс НЕ стирает программу ----------
+     У МК-61 «Сброс» гасит регистры и стек, но введённую программу
+     не трогает. С v6 сброс ещё и возвращает исполнение на страницу 0,
+     поэтому программу проверяем, вернувшись на ту страницу, где она
+     лежала: содержимое цело, а текущая страница после сброса — нулевая. */
+  (function () {
+    var m = fresh();
+    m.selectPage(2);
+    m.core.setProgram([0x09, 0x50]);
+    m.core.ST.ip = 1;
+    m.core.reset(false);
+    var pageAfter = m.page();
+    var ipAfter = m.core.ST.ip;
+    m.selectPage(2);
+    var kept = m.core.ST.prog[0];
+    check('сброс не стирает программу страницы',
+          kept === 0x09 && pageAfter === 0 && ipAfter === 0,
+          'программа=' + kept + ', страница после сброса=' + pageAfter + ', ip=' + ipAfter);
+  })();
+
+  /* ---------- 26. writeExt пишет в текущую страницу ---------- */
+  (function () {
+    var m = fresh();
+    m.selectPage(1);
+    m.core.ST.ip = 0;
+    var ok = m.writeExt(0x02);
+    var inPage1 = (m.core.ST.prog[0] === 0xF0 && m.core.ST.prog[1] === 0x02);
+    m.selectPage(0);
+    var page0Free = (m.core.ST.prog[0] !== 0xF0);
+    check('writeExt пишет в текущую страницу',
+          ok && inPage1 && page0Free,
+          'страница1=' + (inPage1 ? 'F0 02' : 'нет') + ', страница0=' + (page0Free ? 'чиста' : 'тронута'));
+  })();
+
+  /* ---------- 27. сброс не стирает программу других страниц ----------
+     До правки reset() обнулял все страницы, кроме текущей, — то есть
+     сброс уничтожал программы, которых касаться не должен. */
+  (function () {
+    var m = fresh();
+    m.selectPage(1);
+    m.core.setProgram([0x05, 0x50]);      /* страница 1: 5 С/П */
+    m.selectPage(0);
+    m.core.setProgram([0x03, 0x50]);      /* страница 0: 3 С/П */
+    m.core.reset(false);
+    m.selectPage(1);
+    var kept1 = m.core.ST.prog[0];
+    m.selectPage(0);
+    var kept0 = m.core.ST.prog[0];
+    check('сброс сохранил программы обеих страниц',
+          kept1 === 0x05 && kept0 === 0x03,
+          'страница1=' + kept1 + ', страница0=' + kept0);
+  })();
+
+  /* ---------- 28. короткая программа ложится в ТЕКУЩУЮ страницу ----------
+     ПРАВКА v12. В v11 любая загрузка уводила на страницу 0, и записать
+     программу на выбранную страницу стало нельзя: листинг показывал одно,
+     исполнение шло по другому. Теперь короткий массив — в текущую. */
+  (function () {
+    var m = fresh();
+    m.selectPage(2);
+    m.core.setProgram([0x05, 0x50]);
+    var onTwo = (m.core.ST.prog[0] === 0x05);
+    m.selectPage(0);
+    var free0 = (m.core.ST.prog[0] !== 0x05);
+    check('короткая программа ложится в текущую страницу',
+          onTwo && free0,
+          'страница2=' + (onTwo ? '05 есть' : 'пусто') + ', страница0=' + (free0 ? 'чиста' : 'тронута'));
+  })();
+
+  /* ---------- 29. длинная лента редактора — всегда с нулевой страницы ----------
+     Редактор отдаёт 420 ячеек. Такую ленту нельзя класть в текущую
+     страницу: она бы «съехала». Поэтому длинная раскладывается
+     по страницам, а исполнение начинается с нулевой. */
+  (function () {
+    var m = fresh();
+    var len = m.pageSize();
+    var prog = new Array(len * 2).fill(0x54);
+    prog[0] = 0x01;        /* страница 0: 1 */
+    prog[len] = 0x02;      /* страница 1: 2 */
+    m.selectPage(1);       /* специально уходим на чужую страницу */
+    m.core.setProgram(prog);
+    var home = m.page();
+    var p0 = m.core.ST.prog[0];
+    m.selectPage(1);
+    var p1 = m.core.ST.prog[0];
+    check('длинная лента грузится с нулевой страницы',
+          home === 0 && p0 === 0x01 && p1 === 0x02,
+          'страница=' + home + ', стр0=' + p0 + ', стр1=' + p1);
+  })();
+
+  var sum = document.createElement('div');
+  sum.className = 'sum' + (fail ? ' bad' : '');
+  sum.textContent = 'Итог: ' + pass + ' прошло, ' + fail + ' провалилось';
+  document.body.appendChild(sum);
+  document.title = (fail ? '\u2718 ' : '\u2714 ') + 'ext61: ' + pass + '/' + (pass + fail);
+})();
+</script>
+</body>
+</html>

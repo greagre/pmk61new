@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#d7d3c4">
+<title>ЭЛЕКТРОНИКА МК-61 — эмулятор</title>
+<link rel="stylesheet" href="layout.css?v=1">
+</head>
+<body data-theme="classic" data-mode="study" data-tab="num">
+<div class="app">
+  <div class="top">
+    <label for="model">Модель</label>
+    <select id="model" aria-label="Модель калькулятора"></select>
+    <button type="button" class="topbtn" id="themeBtn" title="Тема">▤</button>
+    <button type="button" class="topbtn" id="shelfOpen" title="Библиотека программ">☰</button>
+  </div>
+
+  <div class="calc">
+    <div class="brand"><span>ЭЛЕКТРОНИКА</span><span id="modelName">МК-61</span></div>
+
+    <div class="screen">
+      <div class="lcd" id="lcd">0</div>
+      <div class="lcd-sub">
+        <span>режим: <b id="stMode">АВТ</b></span>
+        <span>слой: <b id="stLayer">—</b></span>
+        <span>угол: <b id="stAngle">Г</b></span>
+        <span>адрес: <b id="stStep">00</b></span>
+      </div>
+    </div>
+
+    <div class="angseg" id="angseg" role="group" aria-label="Единица измерения угла, как переключатель Р-ГРД-Г">
+      <span class="anglab">угол</span>
+      <button type="button" data-angle="deg" title="Градусы — полный оборот 360">Г</button>
+      <button type="button" data-angle="grad" title="Грады — полный оборот 400">ГРД</button>
+      <button type="button" data-angle="rad" title="Радианы — полный оборот 2π">Р</button>
+    </div>
+
+    <button type="button" class="progtag" id="progTag" hidden>
+      <span class="ptag-num" id="progTagNum">01</span>
+      <span class="ptag-name" id="progTagName">n! — факториал</span>
+      <span class="ptag-go">☰</span>
+    </button>
+
+    <div class="keys" id="keys"></div>
+
+    <div class="service" id="service"></div>
+
+    <div class="tempo study-only" id="tempoRow">
+      <span>Темп</span>
+      <select id="tempo" aria-label="Темп автоматического шага">
+        <option value="1">1 с</option>
+        <option value="2" selected>2 с</option>
+        <option value="5">5 с</option>
+        <option value="10">10 с</option>
+        <option value="0">вручную</option>
+      </select>
+    </div>
+
+    <div class="status study-only" id="status"></div>
+
+    <div class="tabs study-only" id="tabs">
+      <button type="button" data-tab="num">Числа</button>
+      <button type="button" data-tab="regs">Регистры</button>
+      <button type="button" data-tab="code">Код</button>
+      <button type="button" data-tab="log">Журнал</button>
+    </div>
+
+    <div class="tabpane study-only" id="tabNum">
+      <div class="stack" id="stack"></div>
+    </div>
+
+    <div class="tabpane regs study-only" id="tabRegs"></div>
+
+    <div class="tabpane study-only" id="tabCode">
+      <div class="prog" id="prog"></div>
+    </div>
+
+    <div class="tabpane study-only" id="tabLog">
+      <div class="logbox">
+        <div class="loghead">
+          <span>Журнал шагов · <b id="logCount">0</b></span>
+          <button type="button" id="logClear">Очистить</button>
+        </div>
+        <div class="log" id="log"></div>
+      </div>
+    </div>
+
+    <div class="hint" id="hint">Готово. Клавиша f открывает второй слой, k — слой К: K-функции и косвенные команды МК-61.</div>
+  </div>
+
+  <div class="modeseg" id="modeseg">
+    <button type="button" data-mode="work">Работа</button>
+    <button type="button" data-mode="study">Учёба</button>
+  </div>
+
+  <div class="foot">
+    <a href="tests.html?v=14">Проверка ядра МК-61</a> ·
+    <a href="tests-banks.html?v=4">Проверка банков и страниц</a> ·
+    <a href="tests-library.html?v=2">Проверка библиотеки</a> ·
+    <a href="tests-ext.html?v=16">Проверка расширения</a> ·
+    <a href="tests-disasm.html?v=12">Проверка декодера</a> ·
+    <a href="tests-asm.html?v=2">Проверка ассемблера</a> ·
+    <a href="tests-editor.html?v=4">Проверка редактора</a> ·
+    <a href="tests-run.html?v=1">Проверка прогонов</a>
+  </div>
+</div>
+
+<div class="shelf" id="shelf" hidden>
+  <div class="shelf-card">
+    <div class="shelf-head">
+      <span>Программы</span>
+      <button type="button" id="shelfClose" aria-label="Закрыть">✕</button>
+    </div>
+    <div class="shelf-tools">
+      <button type="button" id="shelfSave">＋ Сохранить текущую</button>
+      <button type="button" id="shelfExport">⇩ В файл</button>
+      <button type="button" id="shelfImport">⇧ Из файла</button>
+      <input type="file" id="shelfFile" accept=".json,application/json" hidden>
+    </div>
+    <div class="shelf-list" id="shelfList"></div>
+  </div>
+</div>
+
+<script>
+(function () {
+  var KEY = 'pmk61/theme';
+  var ORDER = ['classic', 'light', 'dark'];
+  var ICON = { classic: '▤', light: '☀', dark: '☾' };
+  var NAME = { classic: 'классика — бежевый корпус', light: 'светлая', dark: 'тёмная' };
+  var META = { classic: '#d7d3c4', light: '#eef1f6', dark: '#15181b' };
+  var btn = document.getElementById('themeBtn');
+  var meta = document.querySelector('meta[name="theme-color"]');
+
+  function apply(theme) {
+    if (ORDER.indexOf(theme) < 0) theme = 'classic';
+    document.body.dataset.theme = theme;
+    btn.textContent = ICON[theme];
+    btn.title = 'Тема: ' + NAME[theme] + ' — нажми, чтобы сменить';
+    if (meta) meta.setAttribute('content', META[theme]);
+    try { localStorage.setItem(KEY, theme); } catch (e) {}
+  }
+
+  var saved = null;
+  try { saved = localStorage.getItem(KEY); } catch (e) {}
+  apply(saved && ORDER.indexOf(saved) >= 0 ? saved : 'classic');
+
+  btn.addEventListener('click', function () {
+    var cur = document.body.dataset.theme || 'classic';
+    var i = ORDER.indexOf(cur);
+    apply(ORDER[(i + 1) % ORDER.length]);
+  });
+})();
+</script>
+
+<!-- ПОРЯДОК ПОДКЛЮЧЕНИЯ ВАЖЕН.
+
+     1. core.js → profiles.js: база ядра и коды команд.
+     2. ext61.js → disasm61.js: расширение и декодер (ядро и листинг).
+     3. profiles-ui.js: раскладки и список моделей, в т. ч. «МК-61 (расширенный)».
+     4. ext61-boot.js: ПОСЛЕ раскладок и ДО ui.js — он смотрит выбранную
+        модель, отдаёт ui.js настоящее ядро и перехватывает кнопку F0,
+        возвращая клавиатуру на цифровой слой.
+     5. ui.js → shelf.js → ext61-ui.js → ext61-regs-click.js:
+        интерфейс, библиотека, панель F0 с банком и журналом переходов,
+        регистры: одно касание — показать, двойное — записать X.
+     6. asm61.js → asm-editor.js: ассемблер и панель редактора на вкладке
+        «Код». Панель вставляет себя ПЕРЕД #prog и никогда внутрь: там
+        renderProgram() из ui.js делает innerHTML = '', и всё вложенное
+        исчезло бы при первой перерисовке. Тот же приём, что у панели банков.
+
+     ВАЖНО: версии у всех скриптов поднимаются ВМЕСТЕ. Если поднять один
+     файл и забыть другой, браузер отдаст старый скрипт из кэша — и
+     разъедется всё: панель банков (живёт в ext61-ui.js и вставляется
+     ПЕРЕД #tabRegs, а не внутрь — иначе её сносит renderRegs из ui.js),
+     декодер и обработчик кликов по регистрам.
+
+     ВЕРСИИ ЭТОЙ ПРАВКИ (25.11.2026):
+       ui.js      3 — параметры профиля в create (адреса выше 99 включены),
+                     адрес перехода через core.jumpAddr, печать через
+                     core.addrShow, длина памяти из экземпляра ядра;
+       ui.js      4 — листинг склеивает двухбайтные команды расширения:
+                     F0 01 показывается ОДНОЙ строкой с кодом «F0 01»
+                     и человеческим названием, а не двумя строками «?» и «01».
+                     Размер строки стал свойством строки (info.wide:
+                     1 обычная, 2 у префикса F0, 3 у перехода).
+                     «Занято N» считается по программе (MKDasm.used),
+                     а не по позиции счётчика.
+                     Имя F0-операции берётся у MKExt61.extName — один
+                     источник имён с панелью «Листинг расширения»;
+       ext61.js   9 — EXT-команда завершает набор числа, как любая команда
+                     ядра. Программа «1 F0 05 4 2 F0 40» давала X = 142
+                     вместо 42: после F0 05 набор не закрывался, и цифры
+                     дописывались к уже набранной единице;
+       ext61.js  10 — доставка программы на страницы и сброс страницы.
+                     Редактор отдавал 420 ячеек одним массивом, ядро
+                     клало его целиком в нулевую страницу, а F0 21
+                     переключала ST.prog на ПУСТУЮ страницу 1 — поэтому
+                     пример «Страница 1» давал X = 11 вместо 33.
+                     Теперь setProgram режет длинный массив по страницам
+                     и переводит исполнение на страницу 0, шаг 00.
+                     Полный сброс возвращает текущую страницу на 0;
+       ext61.js  11 — перед любой загрузкой программы исполнение
+                     возвращалось на страницу 0. Дыра была такая: если
+                     «Пуск» уже увёл исполнение на страницу 1 (F0 21),
+                     а потом загрузить короткий пример, он ложился
+                     в ТЕКУЩУЮ страницу. Листинг показывал одно,
+                     исполнение шло по другому;
+       ext61.js  12 — правило v11 оказалось слишком широким: после него
+                     нельзя было записать программу на выбранную страницу,
+                     и пять тестов расширения покраснели. Разделено:
+                     массив не длиннее страницы кладётся в ТЕКУЩУЮ
+                     страницу (низкоуровневая запись, тесты, панели),
+                     длинная лента редактора — на страницу 0 с раскладкой
+                     по страницам 0…3. Для редактора поведение не
+                     изменилось: он всегда отдаёт 420 ячеек;
+       asm61.js   3 — разбор и запись адреса через профиль, «-0»…«-4» в тексте;
+       asm61.js   4 — строка «42» разворачивается в столько команд-цифр,
+                     сколько в числе знаков;
+       asm61.js   5 — директива «.page N»: дальше собирать на страницу N.
+                     Адрес внутри страницы снова начинается с 00. Промежутки
+                     между страницами забиваются НОП. Метки стали
+                     абсолютными (страница × pageSize + адрес). Переход
+                     на метку с ДРУГОЙ страницы — ошибка сборки с подсказкой
+                     про F0 2n. «F0» без второго байта — ошибка, а не две
+                     нулевые ячейки; переполнение сообщает номер строки;
+       tests-asm  2 — 32 проверки, прошли 32/32;
+       asm-editor 3 — список примеров вместо одного; под списком печатается
+                     «ожидается …»; выбранный пример сразу грузится в память;
+       asm-editor 4 — пример межбанка набирает 42 двумя строками «4» и «2»,
+                     а ожидание у F0 11 исправлено на X = 4;
+       asm-editor 5 — добавлены два примера страниц, прежние пять оставлены
+                     без изменений: «Страница 1 — код оттуда исполняется»
+                     (ожидается X = 33) и «Страница 2 — номер страницы в X»
+                     (ожидается X = 2). Панель передаёт ассемблеру размер
+                     страницы и их число от ядра (pageInfo);
+       asm-editor 6 — «занято» считается постранично: пример «Страница 1»
+                     показывал 109 из 420, хотя в двух страницах лежало
+                     6 и 4 ячейки. Строка сборки стала
+                     «Занято N из 420 · страниц K»;
+       asm-editor 7 — кнопка «Проверить» переименована в «Проверить сборку»:
+                     прежнее имя читалось как «проверить результат», хотя
+                     панель только собирает текст и память не трогает.
+                     Список примеров теперь следует за текстом поля, а для
+                     своего текста есть пункт «— свой текст —» и честная
+                     строка «Ожидается: —». Раньше на старте текст брался
+                     из localStorage, а список стоял на первом примере,
+                     и над программой страницы 1 висело «Ожидается: X = 5040».
+                     Сравнение вынесено в чистую функцию matchExample;
+       asm-editor 8 — строка «Занято N» больше не живёт отдельно от текста:
+                     при правке поля она меняется на «Занято — текст изменён,
+                     нажми «Проверить сборку»», а список ошибок прошлой
+                     сборки убирается. Прежнее «Занято 0 из 420» над
+                     программой из четырёх ячеек читалось как «программа
+                     пустая», хотя число было от другой сборки. Число и
+                     ошибки снова появляются только после сборки;
+       asm-editor 9 — «Очистить поле» стала «Очистить всё»: она чистит
+                     поле И память. Раньше она трогала только текст,
+                     а два листинга ниже читают память — после нажатия
+                     в них оставалась прежняя программа, и это читалось
+                     как «кнопка не работает». Пустой текст собирается
+                     в 420 НОП, и такая загрузка и есть очистка памяти.
+                     Строка состояния теперь говорит, сколько лежит
+                     в памяти («в памяти N яч.»), и в подсказке внизу
+                     написано, что листинги показывают память, а не поле;
+       asm-editor 10 — «Пример» больше НЕ грузит программу в память:
+                     он только вставляет текст и собирает его для проверки
+                     («Занято N из 420»), а в память программа попадает
+                     ровно по нажатию «Собрать и загрузить». Раньше пример
+                     грузил сам (так было с v3), из-за чего код калькулятора
+                     внизу появлялся ещё до этой кнопки, и она выглядела
+                     бесполезной. Плюс у главной кнопки убрана постоянная
+                     синяя заливка (класс main читался как «всегда нажата»)
+                     и снимается фокус после нажатия, чтобы телефон
+                     не оставлял рамку. Чистая часть не менялась,
+                     тесты редактора те же — 33 проверки;
+       asm-editor 11 — «Очистить всё» снова стала «Очистить текст»:
+                     кнопка трогает ТОЛЬКО поле. Очистка памяти одним
+                     нажатием без подтверждения стирала только что
+                     набранную программу, которой ещё нет в библиотеке.
+                     Память чистит штатная кнопка «Очистить память»
+                     на калькуляторе, рядом со «Сброс», — дублировать
+                     её в панели незачем. После очистки поля строка
+                     состояния честно пишет «в памяти N яч.», а подсказка
+                     внизу объясняет, где стирать память. Чистая часть
+                     та же, тесты редактора — 33 проверки;
+       guide.html  — страница «Инструкция»: текст и память как разные
+                     места, все кнопки панели, синтаксис ассемблера, банки,
+                     страницы, листинги, регистры, библиотека, что можно
+                     править, страницы проверок. Файл остаётся в репозитории
+                     и будет пополняться; ссылку из подвала главной страницы
+                     убрали — на панели калькулятора она мешала, а страница
+                     открывается по прямому адресу guide.html;
+       tests-editor 1 — 26 проверок чистой части редактора, без DOM;
+       tests-editor 2 — 30 проверок: добавлены пять на matchExample
+                     (узнаётся текст примера, узнаётся страница 2, CRLF
+                     и хвостовые пробелы не мешают, свой текст — null,
+                     пустой — null). Версии скриптов выровнены с index.html:
+                     было asm61 v3 и asm-editor v1, стало asm61 v5
+                     и asm-editor v7 — тесты редактора смотрели на старые
+                     копии, а не на те, что работают в приложении;
+       tests-editor 3 — подключение редактора поднято до v8. Проверок
+                     по-прежнему 31: правка v8 живёт в DOM-части, а чистая
+                     часть не менялась;
+       tests-editor 4 — подключение поднято до v9 и добавлены две проверки
+                     memoryUsed: занятое считается по программе ядра,
+                     без программы — null. Всего 33 проверки;
+       tests-run   1 — автотесты ПРОГОНОВ (tests-run.html). Семь примеров
+                     из панели собираются, кладутся в память и исполняются
+                     на настоящем ядре: сверяются X, Y, R0 банков 0 и 1
+                     и номер страницы. Плюс проверки страниц как состояния:
+                     .page кладёт код по адресу 105; .page при одной
+                     странице — ошибка; повторная .page — перекрытие;
+                     переход на метку чужой страницы — ошибка; сброс
+                     возвращает на страницу 0 и шаг 00, но программу
+                     не стирает; загрузка начинается со страницы 0.
+                     14 проверок, 14/14;
+       tests-ext 16 — тест «сброс не стирает программу страницы» приведён
+                     к поведению v6 (после сброса текущая страница — нулевая,
+                     поэтому содержимое проверяется возвратом на страницу 2).
+                     Добавлены две проверки правила v12: короткая программа
+                     ложится в текущую страницу, длинная лента — всегда
+                     с нулевой и с раскладкой по страницам;
+       tests-disasm 12 — подписи регистров теперь ждутся с буквой R
+                     («x→П R3», «П→x Re»): extName стал печатать R, чтобы
+                     совпадать с листингом и панелью, а семь ожиданий
+                     остались от прежнего вида. Версии скриптов выровнены
+                     с index.html (ext61 v12). -->
+<script src="core.js?v=14"></script>
+<script src="profiles.js?v=14"></script>
+<script src="ext61.js?v=12"></script>
+<script src="disasm61.js?v=8"></script>
+
+<script src="profiles-ui.js?v=3"></script>
+<script src="ext61-boot.js?v=10"></script>
+<script src="ui.js?v=4"></script>
+<script src="shelf.js?v=2"></script>
+<script src="ext61-ui.js?v=10"></script>
+<script src="ext61-regs-click.js?v=4"></script>
+<script src="asm61.js?v=5"></script>
+<script src="asm-editor.js?v=11"></script>
+
+<script>
+/* Переключатель угла Р-ГРД-Г — как в 34-й:
+   ui.js про угол ничего не знает, ядро отдаёт setAngle/getAngle,
+   здесь только кнопки и память. */
+(function () {
+  var KEY = 'pmk61/angle';
+  var MARK = { deg: 'Г', grad: 'ГРД', rad: 'Р' };
+  var WORD = { deg: 'градусы', grad: 'грады', rad: 'радианы' };
+  var seg = document.getElementById('angseg');
+  var mark = document.getElementById('stAngle');
+  var cur = 'deg';
+  if (!seg) return;
+
+  function core() {
+    return (window.MKUI && window.MKUI.getCore) ? window.MKUI.getCore() : null;
+  }
+
+  function paint() {
+    Array.prototype.forEach.call(seg.querySelectorAll('button'), function (b) {
+      b.classList.toggle('on', b.dataset.angle === cur);
+    });
+    if (mark) mark.textContent = MARK[cur];
+    seg.title = 'Угол: ' + WORD[cur];
+  }
+
+  function apply(mode, silent) {
+    if (!MARK[mode]) mode = 'deg';
+    cur = mode;
+    try { localStorage.setItem(KEY, mode); } catch (e) {}
+    var c = core();
+    if (c && c.setAngle) c.setAngle(mode);
+    paint();
+    if (!silent && window.MKUI && window.MKUI.hint) {
+      window.MKUI.hint('Угол: ' + WORD[mode] + ' — sin, cos, tg и обратные считаются в этих единицах');
+    }
+  }
+
+  var saved = null;
+  try { saved = localStorage.getItem(KEY); } catch (e) {}
+  apply(saved && MARK[saved] ? saved : 'deg', true);
+
+  seg.addEventListener('click', function (e) {
+    var b = e.target.closest('button[data-angle]');
+    if (b) apply(b.dataset.angle);
+  });
+
+  var model = document.getElementById('model');
+  if (model) {
+    model.addEventListener('change', function () {
+      setTimeout(function () { apply(cur, true); }, 0);
+    });
+  }
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>pmk61 — контрольные тесты</title>
+<style>
+  :root { --ok:#1a7f37; --bad:#c62828; --line:#d5d8dc; }
+  * { box-sizing: border-box; }
+  body { margin:0; padding:18px 14px 40px; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; font-size:15px; color:#1b1f23; background:#f6f7f9; line-height:1.45; }
+  h1 { font-size:19px; margin:0 0 4px; }
+  .sub { color:#5b6570; font-size:13px; margin-bottom:14px; }
+  button { font:inherit; font-weight:600; padding:11px 18px; border:0; border-radius:10px; background:#2563eb; color:#fff; cursor:pointer; }
+  button:active { background:#1d4ed8; }
+  #summary { margin:14px 0 10px; font-weight:700; font-size:16px; }
+  .pass { color: var(--ok); }
+  .fail { color: var(--bad); }
+  table { width:100%; border-collapse:collapse; background:#fff; font-size:13px; }
+  th, td { border:1px solid var(--line); padding:7px 8px; text-align:left; vertical-align:top; }
+  th { background:#eef0f3; font-size:12px; }
+  td.mark { width:26px; text-align:center; font-weight:700; }
+  td.mark.ok { color: var(--ok); }
+  td.mark.bad { color: var(--bad); }
+  tr.known td { background:#f6f2fd; }
+  .hex { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; white-space:nowrap; }
+  .note { margin-top:16px; color:#5b6570; font-size:12px; }
+  .err { color: var(--bad); font-weight:600; }
+  .hintbox { background:#eef4ff; border:1px solid #c4d6f5; border-radius:10px; padding:10px 12px; margin:0 0 14px; font-size:13px; }
+  .debt { background:#f4f1fb; border:1px solid #cdc2ec; border-radius:10px; padding:10px 12px; margin:0 0 14px; font-size:13px; }
+  .warn { background:#fff3cd; border:1px solid #e0c068; border-radius:10px; padding:10px 12px; margin:0 0 14px; font-size:13px; }
+</style>
+</head>
+<body>
+
+<h1>pmk61 — контрольные тесты</h1>
+<div class="sub">Ядро <span class="hex">core.js</span> + профили <span class="hex">profiles.js</span>, модель <span class="hex">mk-61</span>. Ожидания вписаны по таблице кодов и руководству: красная строка означает расхождение ядра с таблицей.</div>
+
+<div id="stale"></div>
+
+<div class="hintbox">
+  <b>Как записывается адрес перехода.</b> Первая ячейка после команды — десятки, вторая — единицы.
+  Адрес 4 пишется <span class="hex">00 04</span>, а запись <span class="hex">04 00</span> — это адрес 40.
+  Адреса 100…104: первая ячейка <span class="hex">0A</span> («•»), вторая — цифра 0…4, то есть «-0»…«-4».
+</div>
+
+<div class="debt">
+  <b>Долги закрыты:</b><br>
+  1. X→П не завершал набор числа — <b>ревизия 7</b>: 5, X→П, 7 давали 57, теперь 7.<br>
+  2. Коды <span class="hex">4F</span> и <span class="hex">6F</span> давали ЕГГОГ вместо R0 — <b>ревизия 6</b>: теперь пишут и читают R0, как в таблице кодов.<br>
+  <span style="color:#7c5cbf">Что осталось нереализованным, перечислено в шапке <span class="hex">core.js</span>: K AND, K OR, K XOR, K ИНВ и К 1, К 2 дают ЕГГ0Г, потому что руководство не описывает саму операцию.</span>
+</div>
+
+<button id="go">Прогнать все</button>
+<div id="summary">—</div>
+<table id="out">
+  <thead>
+    <tr><th></th><th>Кейс</th><th>Программа</th><th>Ожидание</th><th>Факт</th></tr>
+  </thead>
+  <tbody></tbody>
+</table>
+
+<div class="note">
+  Прогон выполняется в браузере, ничего никуда не отправляется.
+  Если таблица не заполнилась — проверь, что рядом лежат <span class="hex">core.js</span> и <span class="hex">profiles.js</span>.
+</div>
+
+<script src="core.js?v=12"></script>
+<script src="profiles.js?v=12"></script>
+<script>
+(function () {
+  'use strict';
+
+  var MODEL = 'mk-61';
+
+  /* 0x0E — В↑ (иначе две цифры подряд дают одно число),
+     0x50 — С/П, 0x0A — «•» (первая ячейка адресов 100…104),
+     0x0D — Cx (обнуление X, чтобы цифра не дописалась к набору). */
+
+  var CASES = [
+    /* ---- ввод и арифметика ---- */
+    { name: 'Сложение 2 + 3', prog: [0x02, 0x0E, 0x03, 0x10, 0x50], expect: { x: 5 } },
+    { name: 'Умножение 2 × 3', prog: [0x02, 0x0E, 0x03, 0x12, 0x50], expect: { x: 6 } },
+    { name: 'Вычитание 9 − 4', prog: [0x09, 0x0E, 0x04, 0x11, 0x50], expect: { x: 5 } },
+    { name: 'Деление на ноль 1 ÷ 0', prog: [0x01, 0x0E, 0x00, 0x13, 0x50], expect: { err: true } },
+    { name: 'Ввод двух цифр подряд', prog: [0x02, 0x03, 0x50], expect: { x: 23 } },
+    { name: 'Стоп по С/П', prog: [0x05, 0x50], expect: { x: 5 } },
+
+    /* ---- K-функции ---- */
+    { name: 'K |x| при X = −5', prog: [0x31, 0x50], x: -5, expect: { x: 5 } },
+    { name: 'K [x] при X = 3,7', prog: [0x34, 0x50], x: 3.7, expect: { x: 3 } },
+    { name: 'K {x} при X = 3,7', prog: [0x35, 0x50], x: 3.7, expect: { x: 0.7 } },
+    { name: 'K ЗН при X = −5', prog: [0x32, 0x50], x: -5, expect: { x: -1 } },
+    { name: 'K max: Y = 5, X = 0', prog: [0x05, 0x0E, 0x00, 0x36, 0x50], expect: { x: 0 } },
+    { name: 'K max из 5 и 3', prog: [0x05, 0x0E, 0x03, 0x36, 0x50], expect: { x: 5 } },
+    { name: 'K →°′″ при X = 1,523', prog: [0x2A, 0x50], x: 1.523, expect: { x: 1.875 } },
+    { name: 'K ←°′″ при X = 1,875', prog: [0x30, 0x50], x: 1.875, expect: { x: 1.523 } },
+    { name: 'K СЧ: значение в интервале (0, 1)', prog: [0x3B, 0x50], expect: { range: [0, 1] } },
+    { name: 'Y→X копирует Y', prog: [0x02, 0x0E, 0x05, 0x3E, 0x50], expect: { x: 2 } },
+
+    /* ---- переходы и подпрограммы ---- */
+    { name: 'БП вперёд занимает три ячейки', prog: [0x51, 0x00, 0x04, 0x09, 0x07, 0x50], expect: { x: 7 }, about: 'адрес 4 → цифра 7; 04 00 дало бы адрес 40' },
+    { name: 'ПП → В/О: возврат на ip + 3', prog: [0x07, 0x53, 0x00, 0x05, 0x50, 0x52], expect: { x: 7 } },
+    { name: 'Два вложенных ПП', prog: [0x07, 0x53, 0x00, 0x05, 0x50, 0x53, 0x00, 0x08, 0x52, 0x52], expect: { x: 7 } },
+    { name: 'Шестой вложенный ПП — ЕГГОГ', prog: [0x53, 0x00, 0x00], expect: { err: true }, about: 'стек возврата — пять разрядов' },
+    { name: 'F L0: пять итераций назад', prog: [0x05, 0x40, 0x0D, 0x01, 0x10, 0x5D, 0x00, 0x03, 0x50], expect: { x: 5 } },
+    { name: 'К БП: модификация адреса в R1', prog: [0x04, 0x41, 0x0D, 0x07, 0x50], expect: { x: 7 }, about: 'R1 = 4 → К БП 1 вычитает 1 → адрес 3 (Cx), затем цифра 7' },
+    { name: 'К ПП: возврат из косвенного', prog: [0x05, 0x41, 0xA1, 0x50, 0x52], expect: { x: 5 }, about: 'R1 = 5 → адрес 4 (В/О) → возврат на 3' },
+
+    /* ---- прямые условия: обе ветки ---- */
+    { name: 'F x≥0 при X = 0: истина', prog: [0x0D, 0x59, 0x00, 0x05, 0x50, 0x07, 0x50], expect: { x: 0 } },
+    { name: 'F x<0 при X = 0: ложь', prog: [0x0D, 0x5C, 0x00, 0x05, 0x50, 0x07, 0x50], expect: { x: 7 } },
+    { name: 'F x≠0 при X = 5: истина', prog: [0x05, 0x57, 0x00, 0x04, 0x22, 0x50], expect: { x: 25 } },
+    { name: 'F x≠0 при X = 0: ложь', prog: [0x0D, 0x57, 0x00, 0x05, 0x22, 0x07, 0x50], expect: { x: 7 } },
+    { name: 'F x≥0 при X = −5: ложь', prog: [0x59, 0x00, 0x05, 0x22, 0x0D, 0x07, 0x50], x: -5, expect: { x: 7 } },
+    { name: 'F x<0 при X = −5: истина', prog: [0x5C, 0x00, 0x04, 0x22, 0x50], x: -5, expect: { x: 25 } },
+    { name: 'F x=0 при X = 0: истина', prog: [0x0D, 0x5E, 0x00, 0x04, 0x07, 0x50], expect: { x: 7 } },
+    { name: 'F x=0 при X = 5: ложь', prog: [0x05, 0x5E, 0x00, 0x05, 0x22, 0x0D, 0x07, 0x50], expect: { x: 7 } },
+
+    /* ---- косвенные условия ---- */
+    { name: 'K x≠0 при X = 0: переход по R1', prog: [0x0D, 0x71, 0x10, 0x00, 0x07, 0x50], regs: { 1: 5 }, expect: { x: 7 } },
+    { name: 'K x≠0 при X = 5: адрес не воспринимается', prog: [0x71, 0x22, 0x50], regs: { 1: 5 }, x: 5, expect: { x: 25 } },
+    { name: 'K x≥0 при X = −3: переход по R1', prog: [0x91, 0x0D, 0x50, 0x07, 0x50], regs: { 1: 4 }, x: -3, expect: { x: 7 } },
+    { name: 'K x≥0 при X = 5: истина', prog: [0x90, 0x22, 0x50], regs: { 1: 5 }, x: 5, expect: { x: 25 } },
+    { name: 'K x<0 при X = 0: ложь', prog: [0x0D, 0xC1, 0x22, 0x07, 0x50], regs: { 1: 4 }, expect: { x: 7 } },
+    { name: 'K x<0 при X = −5: истина', prog: [0xC1, 0x22, 0x50], regs: { 1: 4 }, x: -5, expect: { x: 25 } },
+    { name: 'K x=0 при X = 0: истина, адрес не воспринимается', prog: [0x0D, 0xE1, 0x01, 0x50], regs: { 1: 4 }, expect: { x: 1 }, about: 'истина → ip + 1, сразу цифра 1 → X = 1; при лжи было бы modAddr(4, 1) = 3 и X = 0' },
+    { name: 'K x=0 при X = 5: ложь', prog: [0x05, 0xE1, 0x22, 0x0D, 0x50], regs: { 1: 4 }, expect: { x: 0 } },
+
+    /* ---- циклы L1–L3 ---- */
+    { name: 'F L1: три итерации по R1', prog: [0x0D, 0x01, 0x10, 0x5B, 0x00, 0x01, 0x50], regs: { 1: 3 }, expect: { x: 3 } },
+    { name: 'F L2: три итерации по R2', prog: [0x0D, 0x01, 0x10, 0x58, 0x00, 0x01, 0x50], regs: { 2: 3 }, expect: { x: 3 } },
+    { name: 'F L3: три итерации по R3', prog: [0x0D, 0x01, 0x10, 0x5A, 0x00, 0x01, 0x50], regs: { 3: 3 }, expect: { x: 3 } },
+
+    /* ---- математика ---- */
+    { name: 'Смена знака /-/', prog: [0x05, 0x0B, 0x50], expect: { x: -5 } },
+    { name: 'ВП: 1 ВП 3 = 1000', prog: [0x01, 0x0C, 0x03, 0x50], expect: { x: 1000 } },
+    { name: 'Вx: возврат прежнего X', prog: [0x03, 0x22, 0x0F, 0x50], expect: { x: 3 }, about: '3 → x² = 9, затем Вx даёт 3' },
+    { name: '↔: обмен X и Y', prog: [0x02, 0x0E, 0x03, 0x14, 0x50], expect: { x: 2 } },
+    { name: '10^x при X = 2', prog: [0x02, 0x15, 0x50], expect: { x: 100 } },
+    { name: 'e^x при X = 1', prog: [0x01, 0x16, 0x50], expect: { x: 2.7182818 } },
+    { name: 'lg 100 = 2', prog: [0x01, 0x00, 0x00, 0x17, 0x50], expect: { x: 2 }, about: 'вводится 100: цифры 1, 0, 0' },
+    { name: 'ln после e^x возвращает 1', prog: [0x01, 0x16, 0x18, 0x50], expect: { x: 1 } },
+    { name: 'π', prog: [0x20, 0x50], expect: { x: 3.1415927 } },
+    { name: '√9 = 3', prog: [0x09, 0x21, 0x50], expect: { x: 3 } },
+    { name: 'x² при X = 7', prog: [0x07, 0x22, 0x50], expect: { x: 49 } },
+    { name: '1/x при X = 4', prog: [0x04, 0x23, 0x50], expect: { x: 0.25 } },
+    { name: 'x^y: 2 в степени 3', prog: [0x02, 0x0E, 0x03, 0x24, 0x50], expect: { x: 8 } },
+    { name: 'F◯: сдвиг стека', prog: [0x02, 0x0E, 0x03, 0x25, 0x50], expect: { x: 2 } },
+    { name: 'arcsin 0,5 = 30°', prog: [0x00, 0x0A, 0x05, 0x19, 0x50], expect: { x: 30 } },
+    { name: 'arccos 0,5 = 60°', prog: [0x00, 0x0A, 0x05, 0x1A, 0x50], expect: { x: 60 } },
+    { name: 'arctg 1 = 45°', prog: [0x01, 0x1B, 0x50], expect: { x: 45 } },
+    { name: 'sin 30° = 0,5', prog: [0x03, 0x00, 0x1C, 0x50], angle: 'deg', expect: { x: 0.5 } },
+    { name: 'cos 60° = 0,5', prog: [0x06, 0x00, 0x1D, 0x50], angle: 'deg', expect: { x: 0.5 } },
+    { name: 'tg 45° = 1', prog: [0x04, 0x05, 0x1E, 0x50], angle: 'deg', expect: { x: 1 } },
+    { name: 'Переключатель ГРД: sin 30 град', prog: [0x03, 0x00, 0x1C, 0x50], angle: 'grad', expect: { x: 0.4539905 } },
+    { name: 'Переключатель Р: sin 0,5 рад', prog: [0x00, 0x0A, 0x05, 0x1C, 0x50], angle: 'rad', expect: { x: 0.4794255 } },
+
+    /* ---- то, что обязано давать ЕГГОГ ---- */
+    { name: 'K − даёт ЕГГОГ', prog: [0x27, 0x50], expect: { err: true } },
+    { name: 'K × даёт ЕГГОГ', prog: [0x28, 0x50], expect: { err: true } },
+    { name: 'K ÷ даёт ЕГГОГ', prog: [0x29, 0x50], expect: { err: true } },
+    { name: 'K AND даёт ЕГГОГ', prog: [0x37, 0x50], expect: { err: true } },
+    { name: 'К 1 даёт ЕГГОГ', prog: [0x55, 0x50], expect: { err: true } },
+
+    /* ---- регистры ---- */
+    { name: 'П→x R1 после X→П 1', prog: [0x07, 0x41, 0x0D, 0x61, 0x50], expect: { x: 7 } },
+    { name: 'Запись и чтение R14 (код 4E/6E)', prog: [0x05, 0x4E, 0x0D, 0x6E, 0x50], expect: { x: 5 }, about: 'у МК-61 пятнадцать регистров' },
+    { name: 'К x→П 1: модификация номера регистра', prog: [0x07, 0xB1, 0x63, 0x50], regs: { 1: 4 }, expect: { x: 7 } },
+    { name: 'К П→x 1: чтение по модифицированному номеру', prog: [0xD1, 0x50], regs: { 1: 4, 3: 5 }, expect: { x: 5 } },
+
+    /* ---- проверки API ---- */
+    { name: 'Адрес 100 → «-0»', api: 'fmt', arg: 100, expect: { text: '-0' } },
+    { name: 'Адрес 104 → «-4»', api: 'fmt', arg: 104, expect: { text: '-4' } },
+    { name: 'Разбор «-4» → 104', api: 'parse', expect: { text: '104' } },
+    { name: 'Ядро читает адрес -4 (51 0A 04)', prog: [0x51, 0x0A, 0x04], api: 'jump', arg: 0, expect: { text: '104' } },
+    { name: 'БП: адрес 12 из двух ячеек', prog: [0x51, 0x01, 0x02], api: 'jump', arg: 0, expect: { text: '12' } },
+    { name: 'Порядок ячеек: 04 00 — адрес 40', prog: [0x51, 0x04, 0x00], api: 'jump', arg: 0, expect: { text: '40' } },
+    { name: 'Порядок ячеек: 00 04 — адрес 4', prog: [0x51, 0x00, 0x04], api: 'jump', arg: 0, expect: { text: '4' } },
+    { name: 'Подпись 4F — «x→П 0»', api: 'cmd', arg: 0x4F, expect: { text: 'x→П 0' } },
+
+    /* ================= РАСШИРЕННЫЙ НАБОР ================= */
+
+    /* ---- арифметика: крайние случаи ---- */
+    { name: 'Сложение 0 + 0', prog: [0x00, 0x0E, 0x00, 0x10, 0x50], expect: { x: 0 } },
+    { name: 'Вычитание 7 − 9 = −2', prog: [0x07, 0x0E, 0x09, 0x11, 0x50], expect: { x: -2 } },
+    { name: 'Деление 8 ÷ 2', prog: [0x08, 0x0E, 0x02, 0x13, 0x50], expect: { x: 4 } },
+    { name: 'Умножение на ноль 2 × 0', prog: [0x02, 0x0E, 0x00, 0x12, 0x50], expect: { x: 0 } },
+    { name: 'Деление нуля 0 ÷ 5', prog: [0x00, 0x0E, 0x05, 0x13, 0x50], expect: { x: 0 } },
+    { name: '1 ÷ 3 = 0,3333333', prog: [0x01, 0x0E, 0x03, 0x13, 0x50], expect: { x: 0.3333333 } },
+    { name: 'Три слагаемых 1 + 2 + 3', prog: [0x01, 0x0E, 0x02, 0x10, 0x0E, 0x03, 0x10, 0x50], expect: { x: 6 } },
+    { name: 'Два умножения 2 × 3 × 4', prog: [0x02, 0x0E, 0x03, 0x12, 0x0E, 0x04, 0x12, 0x50], expect: { x: 24 } },
+    { name: 'Смешанное 9 ÷ 3 + 2', prog: [0x09, 0x0E, 0x03, 0x13, 0x02, 0x10, 0x50], expect: { x: 5 } },
+
+    /* ---- ввод чисел ---- */
+    { name: 'Ввод 0,5 через точку', prog: [0x00, 0x0A, 0x05, 0x50], expect: { x: 0.5 } },
+    { name: 'Ввод 12,34', prog: [0x01, 0x02, 0x0A, 0x03, 0x04, 0x50], expect: { x: 12.34 } },
+    { name: 'Cx закрывает набор числа', prog: [0x05, 0x0D, 0x07, 0x50], expect: { x: 7 }, about: 'после Cx семёрка — новое число, а не 57' },
+    { name: 'Cx обнуляет X', prog: [0x05, 0x0D, 0x50], expect: { x: 0 } },
+    { name: 'Двойная смена знака', prog: [0x05, 0x0B, 0x0B, 0x50], expect: { x: 5 } },
+    { name: '1 ВП 6 = 1000000', prog: [0x01, 0x0C, 0x06, 0x50], expect: { x: 1000000 } },
+
+    /* ---- стек ---- */
+    { name: 'Вx после сложения', prog: [0x02, 0x0E, 0x03, 0x10, 0x0F, 0x50], expect: { x: 3 }, about: '2 + 3 = 5, Вx возвращает прежний X = 3' },
+    { name: 'В↑ дублирует X', prog: [0x07, 0x0E, 0x10, 0x50], expect: { x: 14 }, about: '7 В↑ 7 + = 14' },
+
+    /* ---- математика: ещё ---- */
+    { name: '2^10 = 1024', prog: [0x02, 0x0E, 0x01, 0x00, 0x24, 0x50], expect: { x: 1024 } },
+    { name: '3^2 = 9', prog: [0x03, 0x0E, 0x02, 0x24, 0x50], expect: { x: 9 } },
+    { name: 'lg 1000 = 3', prog: [0x01, 0x00, 0x00, 0x00, 0x17, 0x50], expect: { x: 3 } },
+    { name: 'lg 1 = 0', prog: [0x01, 0x17, 0x50], expect: { x: 0 } },
+    { name: 'ln 1 = 0', prog: [0x01, 0x18, 0x50], expect: { x: 0 } },
+    { name: 'e^x при X = 0 равно 1', prog: [0x00, 0x16, 0x50], expect: { x: 1 } },
+    { name: '10^x при X = 0 равно 1', prog: [0x00, 0x15, 0x50], expect: { x: 1 } },
+    { name: '10^x при X = −1 равно 0,1', prog: [0x01, 0x0B, 0x15, 0x50], expect: { x: 0.1 } },
+    { name: '√2 = 1,4142136', prog: [0x02, 0x21, 0x50], expect: { x: 1.4142136 } },
+    { name: '√0 = 0', prog: [0x00, 0x21, 0x50], expect: { x: 0 } },
+    { name: 'x² при 0,5 = 0,25', prog: [0x00, 0x0A, 0x05, 0x22, 0x50], expect: { x: 0.25 } },
+    { name: 'x² и √ возвращают исходное 3', prog: [0x03, 0x22, 0x21, 0x50], expect: { x: 3 } },
+    { name: '1/x дважды возвращает 4', prog: [0x04, 0x23, 0x23, 0x50], expect: { x: 4 } },
+    { name: 'π × 2 = 6,2831853', prog: [0x20, 0x0E, 0x02, 0x12, 0x50], expect: { x: 6.2831853 } },
+
+    /* ---- тригонометрия: нули и единицы ---- */
+    { name: 'sin 0° = 0', prog: [0x00, 0x1C, 0x50], angle: 'deg', expect: { x: 0 } },
+    { name: 'cos 0° = 1', prog: [0x00, 0x1D, 0x50], angle: 'deg', expect: { x: 1 } },
+    { name: 'tg 0° = 0', prog: [0x00, 0x1E, 0x50], angle: 'deg', expect: { x: 0 } },
+    { name: 'arcsin 1 = 90°', prog: [0x01, 0x19, 0x50], angle: 'deg', expect: { x: 90 } },
+    { name: 'arccos 0 = 90°', prog: [0x00, 0x1A, 0x50], angle: 'deg', expect: { x: 90 } },
+    { name: 'sin 90° = 1', prog: [0x09, 0x00, 0x1C, 0x50], angle: 'deg', expect: { x: 1 } },
+    { name: 'cos 180° = −1', prog: [0x01, 0x08, 0x00, 0x1D, 0x50], angle: 'deg', expect: { x: -1 } },
+
+    /* ---- K-функции: крайние значения ---- */
+    { name: 'K |x| при X = 0', prog: [0x00, 0x31, 0x50], expect: { x: 0 } },
+    { name: 'K max из равных 4 и 4', prog: [0x04, 0x0E, 0x04, 0x36, 0x50], expect: { x: 4 } },
+    { name: 'K [x] при X = 0,9', prog: [0x00, 0x0A, 0x09, 0x34, 0x50], expect: { x: 0 } },
+    { name: 'K {x} при X = 5 (целое)', prog: [0x05, 0x35, 0x50], expect: { x: 0 } },
+
+    /* ---- регистры: несколько ячеек ---- */
+    { name: 'R5: запись и чтение', prog: [0x07, 0x45, 0x0D, 0x65, 0x50], expect: { x: 7 } },
+    { name: 'R0: запись и чтение (код 40/60)', prog: [0x05, 0x40, 0x0D, 0x60, 0x50], expect: { x: 5 } },
+    { name: 'Два регистра: 3 и 4 дают 7', prog: [0x03, 0x41, 0x0D, 0x04, 0x42, 0x0D, 0x61, 0x62, 0x10, 0x50], expect: { x: 7 }, about: 'R1 = 3, R2 = 4, читаем оба и складываем' },
+    { name: 'П→x не стирает регистр', prog: [0x07, 0x41, 0x0D, 0x61, 0x61, 0x10, 0x50], expect: { x: 14 }, about: 'читаем R1 дважды подряд без Cx: 7 + 7; Cx между чтениями обнулил бы Y' },
+    { name: 'X→П перезаписывает регистр', prog: [0x07, 0x41, 0x0D, 0x05, 0x41, 0x0D, 0x61, 0x50], expect: { x: 5 } },
+
+    /* ---- сброс ядра ---- */
+    { name: 'Сброс ядра гасит стек и все регистры', api: 'reset', expect: { text: 'X = 0, R1 = 0, R3 = 0' } },
+
+    /* ---- коды с цифрой F (долг закрыт ревизией 6) ---- */
+    { name: 'X→П завершает набор числа', prog: [0x05, 0x41, 0x07, 0x50], expect: { x: 7 }, about: 'у оригинала после X→П цифра 7 начинает новое число' },
+    { name: 'Код 4F — это R0', prog: [0x05, 0x4F, 0x50], expect: { x: 5 }, about: 'младшая цифра F означает R0 (таблица кодов)' },
+    { name: 'Код 6F — чтение R0', prog: [0x05, 0x4F, 0x0D, 0x6F, 0x50], expect: { x: 5 } }
+  ];
+
+  function fmtProg(p) {
+    if (Array.isArray(p)) {
+      return p.map(function (c) {
+        var s = (c & 255).toString(16).toUpperCase();
+        return s.length < 2 ? '0' + s : s;
+      }).join(' ');
+    }
+    return String(p || '—');
+  }
+
+  function fmtNum(v) {
+    if (typeof v !== 'number' || !isFinite(v)) return String(v);
+    if (Object.is(v, -0)) return '-0';
+    var s = Math.abs(v) >= 1e8 || (Math.abs(v) < 1e-6 && v !== 0)
+      ? v.toExponential(6)
+      : String(Math.round(v * 1e8) / 1e8);
+    return s.replace('.', ',');
+  }
+
+  function checkFresh() {
+    var el = document.getElementById('stale');
+    el.innerHTML = '';
+    if (typeof MKCore === 'undefined' || typeof MKProfiles === 'undefined') return;
+    var bad = [];
+    var p = MKProfiles.get(MODEL);
+    if (p && p.progLen !== 105) bad.push('progLen у mk-61 = ' + p.progLen + ', ожидалось 105');
+    if (MKProfiles.formatAddr(104, MODEL) !== '-4') bad.push('formatAddr(104) = "' + MKProfiles.formatAddr(104, MODEL) + '", ожидалось "-4"');
+    if (MKProfiles.parseAddr('-4', MODEL) !== 104) bad.push('parseAddr("-4") = ' + MKProfiles.parseAddr('-4', MODEL) + ', ожидалось 104');
+    if (bad.length) {
+      el.innerHTML = '<div class="warn"><b>Загружена старая копия файлов.</b><br>' + bad.join('<br>') +
+        '<br>Обнови страницу с очисткой кэша.</div>';
+    }
+  }
+
+  function runCase(c) {
+    var profile = MKProfiles.get(MODEL);
+    if (!profile) return { text: 'нет профиля ' + MODEL, ok: false };
+
+    try {
+      if (c.api === 'fmt') return { text: String(MKProfiles.formatAddr(c.arg, MODEL)) };
+      if (c.api === 'parse') {
+        var pv = MKProfiles.parseAddr('-4', MODEL);
+        return { text: (pv === null ? 'null' : String(pv)) };
+      }
+      if (c.api === 'cmd') return { text: String(MKCore.cmdName(c.arg, profile.regCount)) };
+      if (c.api === 'jump') {
+        var cj = MKCore.create(profile);
+        cj.setProgram(c.prog);
+        return { text: String(cj.jumpAddr(c.arg || 0)) };
+      }
+      if (c.api === 'reset') {
+        var cr = MKCore.create(profile);
+        cr.setRegister(1, 5);
+        cr.setRegister(3, 7);
+        cr.setX(9);
+        cr.reset();
+        return { text: 'X = ' + fmtNum(cr.ST.X) + ', R1 = ' + fmtNum(cr.ST.R[1]) + ', R3 = ' + fmtNum(cr.ST.R[3]) };
+      }
+
+      var ct = MKCore.create(profile);
+      ct.setProgram(c.prog);
+      if (c.angle) ct.setAngle(c.angle);
+      if (c.regs) {
+        Object.keys(c.regs).forEach(function (k) { ct.setRegister(Number(k), c.regs[k]); });
+      }
+      if (typeof c.x === 'number') ct.setX(c.x);
+      ct.run(c.limit || 500);
+
+      var st = ct.ST;
+      if (st.err) return { text: 'ЕГГОГ', err: true };
+      return { text: 'X = ' + fmtNum(st.X), x: st.X, err: false };
+    } catch (e) {
+      return { text: 'сбой: ' + e.message, err: true, ok: false };
+    }
+  }
+
+  function passes(c, got) {
+    var e = c.expect;
+    if (e.text !== undefined) return String(got.text) === String(e.text);
+    if (e.err === true) return got.err === true;
+    if (e.err === false) return got.err === false;
+    if (e.range) {
+      if (got.err || typeof got.x !== 'number') return false;
+      return got.x > e.range[0] && got.x < e.range[1];
+    }
+    if (e.x !== undefined) return !got.err && Math.abs((got.x || 0) - e.x) < 1e-6;
+    return false;
+  }
+
+  function expectText(c) {
+    var e = c.expect;
+    if (e.text !== undefined) return e.text;
+    if (e.err === true) return 'ЕГГОГ';
+    if (e.err === false) return 'без ошибки';
+    if (e.range) return 'между ' + fmtNum(e.range[0]) + ' и ' + fmtNum(e.range[1]);
+    if (e.x !== undefined) return 'X = ' + fmtNum(e.x);
+    return '—';
+  }
+
+  function go() {
+    var tbody = document.querySelector('#out tbody');
+    var summary = document.getElementById('summary');
+    tbody.innerHTML = '';
+
+    if (typeof MKCore === 'undefined' || typeof MKProfiles === 'undefined') {
+      summary.className = 'fail';
+      summary.textContent = 'Ядро не загрузилось: нет core.js или profiles.js рядом с этой страницей';
+      return;
+    }
+
+    checkFresh();
+
+    var passed = 0, total = 0, debt = 0, debtLeft = 0, html = '';
+
+    CASES.forEach(function (c) {
+      var got = runCase(c);
+      var ok = passes(c, got);
+
+      if (c.known) {
+        debt++;
+        if (!ok) debtLeft++;
+      } else {
+        total++;
+        if (ok) passed++;
+      }
+
+      var mark = c.known ? (ok ? '✓' : '!') : (ok ? '✓' : '✗');
+      var cls = c.known ? '' : (ok ? 'ok' : 'bad');
+      var note = c.about ? '<br><span style="color:#6b7280;font-size:12px">' + c.about + '</span>' : '';
+      if (c.angle) note += '<br><span style="color:#6b7280;font-size:12px">угол: ' + c.angle + '</span>';
+      if (c.known) note += '<br><span style="color:#7c5cbf;font-size:12px">долг: ' + (ok ? 'уже закрыт' : 'ещё не исправлено') + '</span>';
+
+      html += '<tr' + (c.known ? ' class="known"' : '') + '>' +
+        '<td class="mark ' + cls + '">' + mark + '</td>' +
+        '<td>' + c.name + note + '</td>' +
+        '<td class="hex">' + fmtProg(c.prog) + '</td>' +
+        '<td>' + expectText(c) + '</td>' +
+        '<td' + (!ok && !c.known ? ' class="err"' : '') + '>' + got.text + '</td>' +
+        '</tr>';
+    });
+
+    tbody.innerHTML = html;
+
+    var txt = 'Пройдено ' + passed + ' из ' + total;
+    if (debt) txt += ' · долг: ' + debtLeft + ' из ' + debt;
+    summary.className = passed === total ? 'pass' : 'fail';
+    summary.textContent = txt;
+  }
+
+  document.getElementById('go').addEventListener('click', go);
+  go();
+})();
+</script>
+</body>
+</html>

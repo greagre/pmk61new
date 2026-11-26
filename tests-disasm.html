@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>pmk61 — проверка декодера</title>
+<style>
+  body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+         margin: 0; padding: 18px 14px 40px; background: #f5f6f8; color: #1c2126; }
+  h1 { font-size: 19px; margin: 0 0 4px; }
+  .sub { color: #6b7480; font-size: 13px; margin-bottom: 16px; }
+  .case { background: #fff; border-radius: 10px; padding: 10px 12px; margin-bottom: 8px;
+          border-left: 4px solid #d3d8de; font-size: 13px; line-height: 1.45; }
+  .ok { border-left-color: #2e9e5b; }
+  .bad { border-left-color: #d94a4a; background: #fff5f5; }
+  .head { font-weight: 600; margin-bottom: 3px; }
+  .fact { color: #6b7480; font-size: 12px; font-family: ui-monospace, Consolas, monospace;
+          white-space: pre-wrap; margin-top: 3px; }
+  .total { margin-top: 16px; padding: 12px 14px; border-radius: 10px; background: #fff;
+           font-size: 15px; font-weight: 600; }
+  .total.bad { background: #fff0f0; color: #b32d2d; }
+  .total.ok { background: #eefaf2; color: #1d7a44; }
+  .note { color: #6b7480; font-size: 12px; margin-top: 14px; line-height: 1.5; }
+</style>
+</head>
+<body>
+<h1>Декодер листинга · pmk61</h1>
+<div class="sub">Проверка disasm61.js. Команды не должны разрываться и сдвигать адреса:
+две ячейки у <b>F0</b>, три у переходов, одна у остальных.</div>
+<div id="out"></div>
+<div class="total" id="total">Идёт проверка…</div>
+<div class="note">Если что-то покраснело после правки — сначала проверь, что страница
+не из кэша: обнови адрес с другим числом в конце (<code>?v=11</code>, <code>?v=12</code>).
+Версия скриптов в этой сборке: core/profiles <code>v=14</code>, ext61 <code>v=12</code>,
+disasm61 <code>v=8</code>. Подписи регистров ждутся с буквой R — «x→П R3»,
+«П→x Re»: так же их печатает панель расширения и листинг.</div>
+
+<script src="core.js?v=14"></script>
+<script src="profiles.js?v=14"></script>
+<script src="ext61.js?v=12"></script>
+<script src="disasm61.js?v=8"></script>
+<script>
+(function () {
+  'use strict';
+
+  var out = document.getElementById('out');
+  var total = document.getElementById('total');
+  var pass = 0, fail = 0;
+
+  function check(name, ok, fact) {
+    if (ok) pass++; else fail++;
+    var d = document.createElement('div');
+    d.className = 'case ' + (ok ? 'ok' : 'bad');
+    var h = document.createElement('div');
+    h.className = 'head';
+    h.textContent = (ok ? '✓ ' : '✗ ') + name;
+    d.appendChild(h);
+    if (fact) {
+      var f = document.createElement('div');
+      f.className = 'fact';
+      f.textContent = fact;
+      d.appendChild(f);
+    }
+    out.appendChild(d);
+  }
+
+  function firstText(prog) {
+    var rr = window.MKDasm && window.MKDasm.rows(prog);
+    return (rr && rr[0]) ? rr[0].text : '';
+  }
+
+  var D = window.MKDasm;
+
+  /* ---------- 1. свежесть ---------- */
+  check('disasm61.js загружен',
+    !!(D && typeof D.rows === 'function'),
+    D ? 'MKDasm.rows есть' : 'MKDasm нет — обнови страницу');
+
+  if (!D) {
+    total.textContent = 'Декодер не загрузился';
+    total.className = 'total bad';
+    return;
+  }
+
+  check('ядро знает isJumpCmd — правило трёх ячеек доступно',
+    !!(window.MKCore && typeof window.MKCore.isJumpCmd === 'function'),
+    window.MKCore ? 'MKCore.isJumpCmd есть' : 'нет — работает запасной список');
+
+  check('ext61.js свежий — F0 4F знает R0',
+    !!(window.MKExt61 && typeof window.MKExt61.extName === 'function' &&
+       window.MKExt61.extName(0x4F) === 'x→П R0 в банк-адресат'),
+    window.MKExt61 ? 'extName(4F)="' + window.MKExt61.extName(0x4F) + '"' : 'MKExt61 нет');
+
+  /* средние цифры: проверка, что номер не теряется на всём диапазоне */
+  check('extName: байт 43 — это R3 (не только 0 и F)',
+    !!(window.MKExt61 && window.MKExt61.extName(0x43) === 'x→П R3 в банк-адресат'),
+    window.MKExt61 ? 'extName(43)="' + window.MKExt61.extName(0x43) + '"' : 'MKExt61 нет');
+
+  check('extName: байт 6E — это R14 (буква e)',
+    !!(window.MKExt61 && window.MKExt61.extName(0x6E) === 'П→x Re из банка-адресата'),
+    window.MKExt61 ? 'extName(6E)="' + window.MKExt61.extName(0x6E) + '"' : 'MKExt61 нет');
+
+  /* ---------- 2. одна двухбайтная команда F0 ---------- */
+  var r = D.rows([0xF0, 0x21, 0x50]);
+  check('F0 21 — одна строка на две ячейки',
+    r.length === 2 && r[0].len === 2 && r[0].kind === 'ext',
+    'строк=' + r.length + ', длина первой=' + (r[0] && r[0].len));
+  check('F0 21 — название «страница 1»',
+    r[0].text === 'страница 1', 'text="' + r[0].text + '"');
+  check('F0 21 — адрес следующей строки 02',
+    r[1].addr === 2, 'addr=' + r[1].addr);
+  check('F0 21 — второй байт не показан отдельной командой',
+    r[0].code === 'F0 21', 'code="' + r[0].code + '"');
+
+  /* ---------- 3. межбанковые ---------- */
+  check('F0 40 — x→П R0 в банк-адресат',
+    firstText([0xF0, 0x40]) === 'x→П R0 в банк-адресат', 'text="' + firstText([0xF0, 0x40]) + '"');
+
+  check('F0 60 — П→x R0 из банка-адресата',
+    firstText([0xF0, 0x60]) === 'П→x R0 из банка-адресата', 'text="' + firstText([0xF0, 0x60]) + '"');
+
+  check('F0 4F — это R0 (F = R0, как в таблице кодов)',
+    firstText([0xF0, 0x4F]) === 'x→П R0 в банк-адресат', 'text="' + firstText([0xF0, 0x4F]) + '"');
+
+  check('F0 6F — тоже R0',
+    firstText([0xF0, 0x6F]) === 'П→x R0 из банка-адресата', 'text="' + firstText([0xF0, 0x6F]) + '"');
+
+  check('F0 05 — банк-адресат ← X',
+    firstText([0xF0, 0x05]) === 'банк-адресат ← X', 'text="' + firstText([0xF0, 0x05]) + '"');
+
+  /* ---------- 4. мусор второго байта ---------- */
+  var r30 = D.rows([0xF0, 0x30]);
+  check('F0 30 — неизвестная EXT-команда, но строка одна',
+    r30.length === 1 && r30[0].len === 2 && r30[0].text === 'неизвестная EXT-команда',
+    'строк=' + r30.length + ', text="' + r30[0].text + '"');
+
+  /* ---------- 5. обычные команды ---------- */
+  var r50 = D.rows([0x50]);
+  check('0x50 — обычная однобайтная команда',
+    r50[0].len === 1 && r50[0].kind === 'cmd', 'len=' + r50[0].len);
+
+  var rz = D.rows([0x00]);
+  check('0x00 — это цифра 0, а не пустой шаг',
+    rz.length === 1 && rz[0].kind === 'cmd' && rz[0].text === '0',
+    'kind=' + rz[0].kind + ', text="' + rz[0].text + '"');
+
+  var rnop = D.rows([0x54]);
+  check('0x54 — пустой шаг (NOP профиля)',
+    rnop.length === 1 && rnop[0].kind === 'nop' && rnop[0].empty === true,
+    'kind=' + rnop[0].kind);
+
+  /* ---------- 6. смешанная программа ---------- */
+  var mix = [0x05, 0x40, 0xF0, 0x02, 0x09, 0x40, 0x50];
+  var rm = D.rows(mix);
+  var addrs = rm.map(function (x) { return x.addr; }).join(',');
+  check('смесь F0 и обычных — без разрывов',
+    addrs === '0,1,2,4,5,6', 'адреса=' + addrs);
+
+  var sum = rm.reduce(function (a, x) { return a + x.len; }, 0);
+  check('сумма длин равна длине участка',
+    sum === 7, 'сумма=' + sum + ', участок=7');
+
+  /* ---------- 7. переходы: три ячейки ---------- */
+  var rj = D.rows([0x5D, 0x00, 0x02, 0x50]);
+  check('F L0 02 — переход занимает три ячейки',
+    rj.length === 2 && rj[0].len === 3 && rj[0].kind === 'jump',
+    'строк=' + rj.length + ', длина первой=' + (rj[0] && rj[0].len));
+  check('F L0 02 — адрес перехода в подписи',
+    rj[0].text === 'F L0 → 02', 'text="' + rj[0].text + '"');
+  check('F L0 02 — следующая строка с адреса 03',
+    rj[1].addr === 3, 'addr=' + rj[1].addr);
+
+  var rbp = D.rows([0x51, 0x00, 0x05]);
+  check('БП 05 — подпись с адресом',
+    rbp[0].text === 'БП → 05' && rbp[0].len === 3, 'text="' + rbp[0].text + '"');
+
+  var rhigh = D.rows([0x51, 0x0A, 0x02]);
+  check('БП -2 — адрес выше 99 пишется через дефис',
+    rhigh[0].text === 'БП → -2', 'text="' + rhigh[0].text + '"');
+
+  /* ---------- 8. F0 в последней ячейке ---------- */
+  var tail = [0x21, 0x54, 0x54, 0xF0];
+  var rt = D.rows(tail);
+  var last = rt[rt.length - 1];
+  check('F0 в последней ячейке — второй байт по кругу',
+    last.kind === 'ext' && last.code === 'F0 21',
+    'code="' + last.code + '", строк=' + rt.length);
+
+  /* ---------- 9. used ---------- */
+  check('used: две команды — две ячейки',
+    D.used([0x05, 0x40]) === 2, 'used=' + D.used([0x05, 0x40]));
+
+  check('used учитывает двухбайтную команду как две ячейки',
+    D.used([0xF0, 0x21]) === 2, 'used=' + D.used([0xF0, 0x21]));
+
+  check('used не считает хвост из NOP',
+    D.used([0x05, 0x40, 0x54, 0x54]) === 2,
+    'used=' + D.used([0x05, 0x40, 0x54, 0x54]));
+
+  check('used учитывает переход как три ячейки',
+    D.used([0x5D, 0x00, 0x02]) === 3, 'used=' + D.used([0x5D, 0x00, 0x02]));
+
+  /* ---------- 10. пустая программа ---------- */
+  check('пустая программа — пустой листинг',
+    D.rows([]).length === 0, 'строк=' + D.rows([]).length);
+
+  check('память из одних NOP — пустой листинг при used=0',
+    D.used([0x54, 0x54, 0x54]) === 0, 'used=' + D.used([0x54, 0x54, 0x54]));
+
+  /* ---------- итог ---------- */
+  total.textContent = 'Итог: ' + pass + ' прошло, ' + fail + ' провалилось';
+  total.className = 'total ' + (fail ? 'bad' : 'ok');
+  document.title = 'pmk61 — декодер ' + pass + '/' + (pass + fail);
+})();
+</script>
+</body>
+</html>

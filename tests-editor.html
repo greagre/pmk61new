@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Тесты редактора ассемблера — pmk61</title>
+<style>
+  :root { color-scheme: light dark; }
+  body { margin:0; padding:16px; font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+         font-size:15px; line-height:1.45; background:#f4f2ea; color:#22252a; }
+  h1 { font-size:18px; margin:0 0 4px; }
+  .sub { font-size:13px; opacity:.72; margin:0 0 14px; }
+  .sum { font-size:15px; font-weight:600; padding:10px 12px; border-radius:10px;
+         background:#e6e2d4; margin-bottom:12px; }
+  .sum.ok { background:#d8ecd9; color:#17692f; }
+  .sum.bad { background:#f7dad6; color:#8f2318; }
+  .list { display:flex; flex-direction:column; gap:6px; }
+  .it { display:flex; gap:8px; padding:8px 10px; border-radius:8px; background:#fff;
+        border:1px solid #e2ded0; }
+  .it .mk { flex:0 0 auto; font-weight:700; }
+  .it.ok .mk { color:#1a8c4a; }
+  .it.bad { border-color:#e0a9a2; background:#fdf1ef; }
+  .it.bad .mk { color:#c0392b; }
+  .it .nm { flex:1; }
+  .it .ex { font-size:12px; opacity:.8; margin-top:3px; white-space:pre-wrap;
+            word-break:break-word; font-family:ui-monospace,SFMono-Regular,Menlo,monospace; }
+  .foot { font-size:12px; opacity:.6; margin-top:14px; }
+  @media (prefers-color-scheme: dark) {
+    body { background:#15181b; color:#dfe3e7; }
+    .sum { background:#232a30; }
+    .sum.ok { background:#16351f; color:#8fe0a3; }
+    .sum.bad { background:#3a1c17; color:#f0a99f; }
+    .it { background:#1b2026; border-color:#2b3238; }
+    .it.bad { background:#2a1a17; border-color:#6a332c; }
+  }
+</style>
+</head>
+<body>
+<h1>Редактор ассемблера: тесты</h1>
+<p class="sub">Чистая часть asm-editor.js без DOM: сборка текста в программу, объём программы,
+длина памяти и занятое в памяти ядра, ошибки с номерами строк и узнавание примеров по тексту.</p>
+<div class="sum" id="sum">…</div>
+<div class="list" id="list"></div>
+<div class="foot">Профили, ассемблер и редактор подключены в том же порядке и тех же версий, что и в index.html.
+Панель на этой странице не появляется: #prog здесь нет, и редактор молча ничего не вставляет.</div>
+
+<script src="profiles.js?v=14"></script>
+<script src="asm61.js?v=5"></script>
+<script src="asm-editor.js?v=9"></script>
+<script>
+(function () {
+  'use strict';
+
+  var E = window.MKAsmEditor;
+  var NOP = 0x54;
+  var tests = [];
+
+  function t(name, fn) { tests.push({ name: name, fn: fn }); }
+
+  function eq(got, want, what) {
+    if (got !== want) {
+      throw new Error((what || 'значение') + ': получили ' + JSON.stringify(got) +
+        ', ждали ' + JSON.stringify(want));
+    }
+  }
+
+  function same(got, want, what) {
+    var a = JSON.stringify(got), b = JSON.stringify(want);
+    if (a !== b) throw new Error((what || 'массив') + ': получили ' + a + ', ждали ' + b);
+  }
+
+  function ok(v, what) {
+    if (!v) throw new Error((what || 'ожидание') + ' не выполнено');
+  }
+
+  /* ---------- объём программы ---------- */
+
+  t('ОБЪЁМ: хвост пустых шагов не считается', function () {
+    eq(E.trimTrailingNop([0x10, 0x50, NOP, NOP]), 2);
+  });
+
+  t('ОБЪЁМ: без хвоста длина не меняется', function () {
+    eq(E.trimTrailingNop([0x10, 0x50]), 2);
+  });
+
+  t('ОБЪЁМ: пустой массив — ноль', function () {
+    eq(E.trimTrailingNop([]), 0);
+  });
+
+  t('ОБЪЁМ: свой код пустого шага', function () {
+    eq(E.trimTrailingNop([0x10, 0x00, 0x00], 0x00), 1);
+  });
+
+  t('ОБЪЁМ: не массив — ноль', function () {
+    eq(E.trimTrailingNop(null), 0);
+  });
+
+  /* ---------- ошибки ---------- */
+
+  t('ОШИБКИ: номер строки впереди', function () {
+    same(E.errorLines([{ line: 3, msg: 'Неизвестная команда: ХЗ' }]),
+      ['строка 3: Неизвестная команда: ХЗ']);
+  });
+
+  t('ОШИБКИ: без номера — только текст', function () {
+    same(E.errorLines([{ line: 0, msg: 'Программа не помещается' }]),
+      ['Программа не помещается']);
+  });
+
+  t('ОШИБКИ: пустой список — пусто', function () {
+    eq(E.errorLines(null).length, 0);
+    eq(E.errorLines([]).length, 0);
+  });
+
+  /* ---------- длина памяти ---------- */
+
+  t('ПАМЯТЬ: без ядра — 105', function () {
+    eq(E.memoryLength(null), 105);
+  });
+
+  t('ПАМЯТЬ: обычная МК-61 — 105', function () {
+    eq(E.memoryLength({ PROG_LEN: 105 }), 105);
+  });
+
+  t('ПАМЯТЬ: четыре страницы — 420', function () {
+    eq(E.memoryLength({ PROG_LEN: 105, ext: { pagesCount: function () { return 4; } } }), 420);
+  });
+
+  t('ПАМЯТЬ: ноль страниц считается одной', function () {
+    eq(E.memoryLength({ PROG_LEN: 105, ext: { pagesCount: function () { return 0; } } }), 105);
+  });
+
+  /* Занятое в памяти ядра: строка состояния говорит «в памяти N яч.»,
+     и это число считается по программе ядра, а не по тексту поля. */
+
+  t('ПАМЯТЬ: занятое считается по программе ядра', function () {
+    var prog = [];
+    for (var i = 0; i < 105; i++) prog.push(i < 3 ? 0x10 : NOP);
+    eq(E.memoryUsed({ PROG_LEN: 105, ST: { prog: prog } }), 3);
+  });
+
+  t('ПАМЯТЬ: без программы ядра — null', function () {
+    eq(E.memoryUsed(null), null);
+    eq(E.memoryUsed({ PROG_LEN: 105 }), null);
+  });
+
+  /* ---------- сборка ---------- */
+
+  t('СБОРКА: две команды — две ячейки', function () {
+    var r = E.buildProgram('+\nС/П', { len: 105 });
+    ok(r.ok, 'сборка');
+    same(r.cells, [0x10, 0x50]);
+    eq(r.count, 2);
+  });
+
+  t('СБОРКА: программа получает всю длину памяти', function () {
+    var r = E.buildProgram('+\nС/П', { len: 105 });
+    eq(r.program.length, 105);
+  });
+
+  t('СБОРКА: пустой хвост забит NOP', function () {
+    var r = E.buildProgram('+\nС/П', { len: 105 });
+    eq(r.program[2], NOP);
+    eq(r.program[104], NOP);
+  });
+
+  t('СБОРКА: занято — по коду, а не по длине массива', function () {
+    var r = E.buildProgram('+\nС/П', { len: 105 });
+    eq(r.used, 2);
+  });
+
+  t('СБОРКА: пустой текст — пустая программа', function () {
+    var r = E.buildProgram('', { len: 105 });
+    ok(r.ok, 'сборка пустого текста');
+    eq(r.count, 0);
+    eq(r.used, 0);
+    eq(r.program.length, 105);
+  });
+
+  t('СБОРКА: метка и переход на неё', function () {
+    var r = E.buildProgram('m:\n+\nБП m', { len: 105 });
+    ok(r.ok, 'сборка с меткой');
+    same(r.cells, [0x10, 0x51, 0x00, 0x00]);
+    eq(r.labels.M, 0);
+  });
+
+  t('СБОРКА: адрес 100 записывается двумя ячейками', function () {
+    var r = E.buildProgram('БП 100', { len: 105 });
+    ok(r.ok, 'сборка адреса 100');
+    same(r.cells, [0x51, 0x0A, 0x00]);
+  });
+
+  t('СБОРКА: адрес с минусом, как на индикаторе', function () {
+    var r = E.buildProgram('БП -3', { len: 105 });
+    ok(r.ok, 'сборка адреса -3');
+    same(r.cells, [0x51, 0x0A, 0x03]);
+  });
+
+  t('СБОРКА: ошибка называет строку', function () {
+    var r = E.buildProgram('+\nХЗ\nС/П', { len: 105 });
+    eq(r.ok, false);
+    ok(/^строка 2:/.test(r.errors[0]), 'номер строки в первой ошибке');
+  });
+
+  t('СБОРКА: при ошибке программу не отдаём', function () {
+    var r = E.buildProgram('+\nХЗ', { len: 105 });
+    eq(r.program.length, 0);
+  });
+
+  t('СБОРКА: адрес вне предела — ошибка', function () {
+    var r = E.buildProgram('БП 250', { len: 105 });
+    eq(r.ok, false);
+  });
+
+  t('СБОРКА: 110 команд не влезают в 105', function () {
+    var src = [];
+    for (var i = 0; i < 110; i++) src.push('+');
+    var r = E.buildProgram(src.join('\n'), { len: 105 });
+    eq(r.ok, false);
+  });
+
+  t('СБОРКА: те же 110 команд влезают в 420', function () {
+    var src = [];
+    for (var i = 0; i < 110; i++) src.push('+');
+    var r = E.buildProgram(src.join('\n'), { len: 420 });
+    ok(r.ok, 'сборка 110 команд в 420');
+    eq(r.count, 110);
+    eq(r.program.length, 420);
+    eq(r.used, 110);
+  });
+
+  t('СБОРКА: без ассемблера — понятная ошибка', function () {
+    var saved = window.MKAsm;
+    window.MKAsm = null;
+    var r = E.buildProgram('+', { len: 105 });
+    window.MKAsm = saved;
+    eq(r.ok, false);
+    ok(/ассемблер/i.test(r.errors[0]), 'текст про отсутствующий ассемблер');
+  });
+
+  /* ---------- узнавание примеров по тексту ----------
+     Список примеров следует за текстом поля: без этого на старте стоял
+     первый пункт, а в поле лежал текст прошлого сеанса, и «Ожидается»
+     показывало числа чужой программы. */
+
+  t('ПРИМЕР: текст факториала узнаётся', function () {
+    eq(E.matchExample(E.examples[0].src), 'fact');
+  });
+
+  t('ПРИМЕР: текст страницы 2 узнаётся', function () {
+    eq(E.matchExample(E.examples[6].src), 'page2');
+  });
+
+  t('ПРИМЕР: CRLF и хвостовые пробелы не мешают', function () {
+    var src = E.examples[1].src.split('\n').map(function (line) {
+      return line + '   ';
+    }).join('\r\n');
+    eq(E.matchExample(src), E.examples[1].id);
+  });
+
+  t('ПРИМЕР: свой текст не узнаётся', function () {
+    eq(E.matchExample('+\nС/П'), null);
+  });
+
+  t('ПРИМЕР: пустой текст — null', function () {
+    eq(E.matchExample(''), null);
+    eq(E.matchExample('   \n  '), null);
+  });
+
+  /* ---------- прогон ---------- */
+
+  var sum = document.getElementById('sum');
+  var list = document.getElementById('list');
+  var passed = 0;
+  var failed = 0;
+
+  tests.forEach(function (test, idx) {
+    var row = document.createElement('div');
+    var mk = document.createElement('span');
+    mk.className = 'mk';
+    var nm = document.createElement('span');
+    nm.className = 'nm';
+    nm.textContent = (idx + 1) + '. ' + test.name;
+
+    try {
+      test.fn();
+      row.className = 'it ok';
+      mk.textContent = '✓';
+      passed++;
+    } catch (e) {
+      row.className = 'it bad';
+      mk.textContent = '✕';
+      failed++;
+      var ex = document.createElement('div');
+      ex.className = 'ex';
+      ex.textContent = (e && e.message) ? e.message : String(e);
+      nm.appendChild(ex);
+    }
+
+    row.appendChild(mk);
+    row.appendChild(nm);
+    list.appendChild(row);
+  });
+
+  sum.textContent = passed + ' из ' + tests.length +
+    (failed ? ' · провалено ' + failed : ' · всё зелёное');
+  sum.className = 'sum ' + (failed ? 'bad' : 'ok');
+})();
+</script>
+</body>
+</html>

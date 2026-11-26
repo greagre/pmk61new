@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Проверка ассемблера МК-61</title>
+<style>
+  body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+         margin: 0; padding: 16px; background: #f2efe6; color: #24211c; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  .sub { font-size: 13px; color: #6b655a; margin-bottom: 12px; }
+  .sum { font-size: 15px; font-weight: 600; padding: 10px 12px; border-radius: 10px;
+         background: #e6e1d3; margin-bottom: 12px; }
+  .sum.ok { background: #d9efdc; color: #1b5e20; }
+  .sum.bad { background: #f7dcdc; color: #8e1b1b; }
+  ol { padding-left: 22px; margin: 0; }
+  li { margin: 6px 0; font-size: 14px; line-height: 1.35; }
+  li .m { color: #1b5e20; font-weight: 700; }
+  li .x { color: #8e1b1b; font-weight: 700; }
+  li code { background: #e8e3d5; padding: 1px 4px; border-radius: 4px; font-size: 13px; }
+  .err { display: block; color: #8e1b1b; font-size: 12px; margin-top: 2px; }
+</style>
+</head>
+<body>
+<h1>Проверка ассемблера</h1>
+<div class="sub">Сборка текста в ячейки и обратный круг через декодер. Файлы: asm61.js, disasm61.js, core.js.</div>
+<div class="sum" id="sum">Считаю…</div>
+<ol id="list"></ol>
+
+<script src="core.js?v=14"></script>
+<script src="ext61.js?v=8"></script>
+<script src="disasm61.js?v=8"></script>
+<script src="asm61.js?v=2"></script>
+<script>
+(function () {
+  'use strict';
+
+  var list = document.getElementById('list');
+  var sum = document.getElementById('sum');
+  var tests = [];
+  var passed = 0;
+  var failed = 0;
+
+  function add(name, fn) { tests.push({ name: name, fn: fn }); }
+
+  function fail(msg) { throw new Error(msg); }
+
+  function eq(actual, expected, what) {
+    var a = JSON.stringify(actual);
+    var b = JSON.stringify(expected);
+    if (a !== b) fail((what || 'значение') + ': получилось ' + a + ', ожидалось ' + b);
+  }
+
+  function asm(src) { return MKAsm.assemble(src, {}); }
+
+  function cells(src) {
+    var r = asm(src);
+    if (!r.ok) fail('сборка не удалась: ' + r.errors.map(function (e) { return e.msg; }).join('; '));
+    return r.cells;
+  }
+
+  /* ---------- простые команды ---------- */
+  add('Цифра 5 — один байт 0x05', function () {
+    eq(cells('5'), [0x05]);
+  });
+
+  add('Сложение, С/П — два байта', function () {
+    /* одна строка — одна команда, поэтому две строки */
+    eq(cells('+\nС/П'), [0x10, 0x50]);
+  });
+
+  add('Минус с символом U+2212 понимается как код 0x11', function () {
+    eq(cells('\u2212'), [0x11]);
+  });
+
+  add('К НОП — 0x54', function () {
+    eq(cells('К НОП'), [0x54]);
+  });
+
+  /* ---------- команды с регистром ---------- */
+  add('X→П 4 — 0x44', function () {
+    eq(cells('x\u2192П 4'), [0x44]);
+  });
+
+  add('П→X a — 0x6A (регистр 10)', function () {
+    eq(cells('П\u2192X a'), [0x6A]);
+  });
+
+  add('K X→П e — 0xBE', function () {
+    eq(cells('K x\u2192П e'), [0xBE]);
+  });
+
+  add('Кириллическая К равнозначна латинской: К X→П E — 0xBE', function () {
+    eq(cells('К X\u2192П E'), [0xBE]);
+  });
+
+  add('Неверный регистр — ошибка', function () {
+    var r = asm('x\u2192П 20');
+    if (r.ok) fail('сборка не должна была пройти');
+    if (!/регистр/i.test(r.errors[0].msg)) fail('не та ошибка: ' + r.errors[0].msg);
+  });
+
+  /* ---------- К-арифметика ---------- */
+  add('К −, К ×, К ÷ — коды 0x27, 0x28, 0x29', function () {
+    eq(cells('К \u2212\nК \u00D7\nК \u00F7'), [0x27, 0x28, 0x29]);
+  });
+
+  /* ---------- переходы ---------- */
+  add('БП 05 — три ячейки', function () {
+    eq(cells('БП 05'), [0x51, 0x00, 0x05]);
+  });
+
+  add('F L0 12 — цикл с адресом 12', function () {
+    eq(cells('F L0 12'), [0x5D, 0x01, 0x02]);
+  });
+
+  add('ПП 3 — три ячейки, адрес 03', function () {
+    eq(cells('ПП 3'), [0x53, 0x00, 0x03]);
+  });
+
+  add('Адрес 100 — «·» и цифра 0', function () {
+    eq(cells('БП 100'), [0x51, 0x0A, 0x00]);
+  });
+
+  add('Адрес 200 — ошибка предела', function () {
+    var r = asm('БП 200');
+    if (r.ok) fail('сборка не должна была пройти');
+    if (!/предел/i.test(r.errors[0].msg)) fail('не та ошибка: ' + r.errors[0].msg);
+  });
+
+  /* ---------- метки ---------- */
+  add('Метка ниже ссылки: адрес подставляется', function () {
+    var prog = [
+      'П\u2192X 5',
+      'm1: F X=0 m2',
+      'БП m1',
+      'm2: С/П'
+    ].join('\n');
+    eq(cells(prog), [0x65, 0x5E, 0x00, 0x07, 0x51, 0x00, 0x01, 0x50]);
+  });
+
+  add('Неизвестная метка — ошибка', function () {
+    var r = asm('БП нет_такой');
+    if (r.ok) fail('сборка не должна была пройти');
+    if (!/метка/i.test(r.errors[0].msg)) fail('не та ошибка: ' + r.errors[0].msg);
+  });
+
+  add('Дубль метки — ошибка', function () {
+    var r = asm('a: 5\na: 6');
+    if (r.ok) fail('сборка не должна была пройти');
+    if (!/уже определена/i.test(r.errors[0].msg)) fail('не та ошибка: ' + r.errors[0].msg);
+  });
+
+  /* ---------- комментарии и пустой ввод ---------- */
+  add('Комментарии и пустые строки игнорируются', function () {
+    eq(cells('; начнём\n\n# ещё\n5  ; цифра'), [0x05]);
+  });
+
+  add('Пустой текст — ноль ячеек, без ошибок', function () {
+    var r = asm('');
+    if (!r.ok) fail('пустая программа не должна давать ошибок');
+    eq(r.cells, []);
+  });
+
+  /* ---------- расширение ---------- */
+  add('F0 41 — два байта', function () {
+    eq(cells('F0 41'), [0xF0, 0x41]);
+  });
+
+  add('F0 без второго байта — ошибка', function () {
+    var r = asm('F0');
+    if (r.ok) fail('сборка не должна была пройти');
+  });
+
+  add('Байт напрямую: .3C', function () {
+    eq(cells('.3C'), [0x3C]);
+  });
+
+  add('Байт 0x3D и обратно через декодер', function () {
+    var progCells = cells('.3D');
+    eq(progCells, [0x3D]);
+    var rows = MKDasm.rows(progCells);
+    eq(rows.length, 1);
+    eq(rows[0].code, '3D');
+  });
+
+  /* ---------- круг: собрал → разобрал ---------- */
+  add('Круг с декодером: строки совпадают по кодам', function () {
+    var prog = [
+      'П\u2192X 5',
+      'm1: F X=0 m2',
+      'БП m1',
+      'm2: С/П'
+    ].join('\n');
+    var progCells = cells(prog);
+    var rows = MKDasm.rows(progCells);
+    var codes = rows.map(function (r) { return r.code; });
+    eq(codes, ['65', '5E 00 07', '51 00 01', '50']);
+    eq(rows.map(function (r) { return r.addr; }), [0, 1, 4, 7]);
+  });
+
+  add('Круг: F0 остаётся двухбайтной строкой', function () {
+    var progCells = cells('F0 41\nС/П');
+    var rows = MKDasm.rows(progCells);
+    eq(rows.length, 2);
+    eq(rows[0].code, 'F0 41');
+    eq(rows[0].kind, 'ext');
+    eq(rows[1].addr, 2);
+  });
+
+  add('Адрес 100 разбирается декодером как -0', function () {
+    var progCells = cells('БП 100');
+    var rows = MKDasm.rows(progCells);
+    if (rows[0].text.indexOf('-0') < 0) fail('декодер не понял адрес 100: ' + rows[0].text);
+  });
+
+  /* ---------- покрытие: язык ассемблера = язык декодера ---------- */
+  add('Покрытие: каждое имя из cmdName собирается в свой код', function () {
+    var bad = [];
+    for (var c = 0x00; c <= 0xEF; c++) {
+      var nm = MKCore.cmdName(c);
+      if (!nm || nm === '?') continue;
+      if (MKCore.isJumpCmd(c)) continue;
+      /* пометка «(дубль)» — это пояснение декодера о неоднозначном коде,
+         а не команда языка программиста */
+      if (/\(дубль\)/i.test(nm)) continue;
+      /* цифра F в младшей цифре означает тот же R0, в тексте её не пишут */
+      if (c >= 0x40 && (c & 0x0F) === 0x0F) continue;
+
+      var r = MKAsm.assemble(MKAsm.norm(nm), {});
+      if (!r.ok) { bad.push(MKCore.hex2(c) + ' «' + nm + '» не собрался'); continue; }
+      if (r.cells.length !== 1 || r.cells[0] !== c) {
+        bad.push(MKCore.hex2(c) + ' «' + nm + '» дал ' + MKCore.hex2(r.cells[0]));
+      }
+    }
+    if (bad.length) fail(bad.slice(0, 6).join('; ') + (bad.length > 6 ? ' и ещё ' + (bad.length - 6) : ''));
+  });
+
+  add('Покрытие: все переходы собираются в три ячейки', function () {
+    var keys = Object.keys(MKAsm.tables.jumps);
+    var bad = [];
+    for (var i = 0; i < keys.length; i++) {
+      var code = MKAsm.tables.jumps[keys[i]];
+      var r = MKAsm.assemble(keys[i] + ' 07', {});
+      if (!r.ok || r.cells.length !== 3 || r.cells[0] !== code ||
+          r.cells[1] !== 0 || r.cells[2] !== 7) {
+        bad.push(keys[i]);
+      }
+    }
+    if (bad.length) fail(bad.join(', '));
+  });
+
+  /* ---------- загрузка в память ---------- */
+  add('toProgram: длина 105, свободные шаги — NOP', function () {
+    var progCells = cells('+\nС/П');
+    var mem = MKAsm.toProgram(progCells, { len: 105, nop: 0x54 });
+    eq(mem.length, 105);
+    eq([mem[0], mem[1], mem[2], mem[104]], [0x10, 0x50, 0x54, 0x54]);
+  });
+
+  add('toProgram: четыре страницы — 420 ячеек', function () {
+    var progCells = cells('+\nС/П');
+    var mem = MKAsm.toProgram(progCells, { len: 4 * 105, nop: 0x54 });
+    eq(mem.length, 420);
+    eq([mem[0], mem[1], mem[2], mem[104], mem[105], mem[419]],
+       [0x10, 0x50, 0x54, 0x54, 0x54, 0x54]);
+  });
+
+  add('used считает занятые ячейки без NOP', function () {
+    var progCells = cells('+\nС/П');
+    var mem = MKAsm.toProgram(progCells, { len: 105, nop: 0x54 });
+    eq(MKDasm.used(mem), 2);
+  });
+
+  /* ---------- прогон ---------- */
+  for (var t = 0; t < tests.length; t++) {
+    var li = document.createElement('li');
+    var name = document.createElement('span');
+    name.textContent = tests[t].name;
+    li.appendChild(name);
+    try {
+      tests[t].fn();
+      passed++;
+      var okm = document.createElement('span');
+      okm.className = 'm';
+      okm.textContent = ' — ✅';
+      li.appendChild(okm);
+    } catch (e) {
+      failed++;
+      var bad = document.createElement('span');
+      bad.className = 'x';
+      bad.textContent = ' — ❌';
+      li.appendChild(bad);
+      var err = document.createElement('span');
+      err.className = 'err';
+      err.textContent = e && e.message ? e.message : String(e);
+      li.appendChild(err);
+    }
+    list.appendChild(li);
+  }
+
+  sum.textContent = passed + ' из ' + tests.length + ' зелёные' +
+    (failed ? ' · ' + failed + ' красных' : '');
+  sum.className = 'sum ' + (failed ? 'bad' : 'ok');
+})();
+</script>
+</body>
+</html>

@@ -1,0 +1,278 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Проверка прогонов МК-61</title>
+<style>
+  body { font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+         margin: 0; padding: 16px; background: #f2efe6; color: #24211c; }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  .sub { font-size: 13px; color: #6b655a; margin-bottom: 12px; }
+  .sum { font-size: 15px; font-weight: 600; padding: 10px 12px; border-radius: 10px;
+         background: #e6e1d3; margin-bottom: 12px; }
+  .sum.ok { background: #d9efdc; color: #1b5e20; }
+  .sum.bad { background: #f7dcdc; color: #8e1b1b; }
+  ol { padding-left: 22px; margin: 0; }
+  li { margin: 6px 0; font-size: 14px; line-height: 1.35; }
+  li .m { color: #1b5e20; font-weight: 700; }
+  li .x { color: #8e1b1b; font-weight: 700; }
+  li code { background: #e8e3d5; padding: 1px 4px; border-radius: 4px; font-size: 13px; }
+  .err { display: block; color: #8e1b1b; font-size: 12px; margin-top: 2px; }
+</style>
+</head>
+<body>
+<h1>Проверка прогонов</h1>
+<div class="sub">
+  Сборка текста → память → исполнение на настоящем ядре. Каждый пример
+  прогоняется целиком и сверяется с числами, а не на глаз.
+  Файлы: core.js, ext61.js, asm61.js, asm-editor.js.
+</div>
+<div class="sum" id="sum">Считаю…</div>
+<ol id="list"></ol>
+
+<script src="core.js?v=14"></script>
+<script src="ext61.js?v=11"></script>
+<script src="asm61.js?v=5"></script>
+<script src="asm-editor.js?v=6"></script>
+<script>
+(function () {
+  'use strict';
+
+  var list = document.getElementById('list');
+  var sum = document.getElementById('sum');
+  var tests = [];
+  var passed = 0;
+  var failed = 0;
+
+  var PAGE_SIZE = 105;      /* шагов на страницу у МК-61 */
+  var PAGES = 4;            /* страниц у расширения */
+  var LEN = PAGE_SIZE * PAGES;
+
+  function add(name, fn) { tests.push({ name: name, fn: fn }); }
+  function fail(msg) { throw new Error(msg); }
+
+  function near(a, b) {
+    if (typeof a !== 'number' || typeof b !== 'number') return false;
+    return Math.abs(a - b) < 1e-9;
+  }
+
+  function show(v) {
+    if (typeof v !== 'number') return String(v);
+    return String(Math.round(v * 1e8) / 1e8);
+  }
+
+  /* Свежее ядро с расширением: 105 шагов на страницу, 15 регистров,
+     адреса 100…104 разрешены — профиль МК-61. */
+  function makeExt() {
+    return MKExt61.create({
+      progLen: PAGE_SIZE,
+      regCount: 15,
+      addrHigh: true,
+      addrHighFirst: 100,
+      addrHighLast: 104
+    });
+  }
+
+  /* Текст → 420 ячеек. Длину и число страниц передаём явно: у голого
+     ядра расширения нет, и pageInfo() иначе решит, что страница одна. */
+  function build(ext, text) {
+    return MKAsmEditor.buildProgram(text, {
+      core: ext.core,
+      len: LEN,
+      pageSize: PAGE_SIZE,
+      pages: PAGES
+    });
+  }
+
+  function load(ext, text) {
+    var r = build(ext, text);
+    if (!r.ok) fail('сборка не удалась: ' + r.errors.join('; '));
+    ext.core.setProgram(r.program, false);
+    return r;
+  }
+
+  /* Регистр в нужном банке: selectBank подменяет ссылку ST.R,
+     поэтому читать надо после переключения и возвращать банк назад. */
+  function regOfBank(ext, bankIdx, reg) {
+    var was = ext.bank();
+    ext.selectBank(bankIdx);
+    var v = ext.ST.R[reg];
+    ext.selectBank(was);
+    return v;
+  }
+
+  function exampleById(id) {
+    for (var i = 0; i < examples.length; i++) {
+      if (examples[i].id === id) return examples[i];
+    }
+    return null;
+  }
+
+  /* Ожидания по id примера. Текст примера — источник задачи,
+     эти числа — источник истины при проверке. */
+  var EXPECT = {
+    fact:   { x: 5040 },
+    page:   { x: 0, page: 0 },
+    addr:   { x: 4, y: 0 },
+    banks:  { x: 7, r0: 7, bank1r0: 8 },
+    target: { x: 42, r0: 0, bank1r0: 42 },
+    page1:  { x: 33, r0: 33, page: 1 },
+    page2:  { x: 2, page: 2 }
+  };
+
+  var examples = (window.MKAsmEditor && MKAsmEditor.examples) || [];
+  if (!examples.length) fail('панель не отдала примеры: подключи asm-editor.js');
+
+  /* ---------- прогон каждого примера из панели ---------- */
+
+  examples.forEach(function (ex) {
+    add('Пример «' + ex.name + '» · ' + ex.expect, function () {
+      var o = EXPECT[ex.id];
+      if (!o) fail('нет ожиданий для примера «' + ex.id + '» — допиши в EXPECT');
+
+      var ext = makeExt();
+      load(ext, ex.src);
+      var res = ext.run(20000);
+      var ST = ext.ST;
+
+      if (res.err) fail('ЕГГ0Г на шаге ' + res.steps);
+      if (res.result !== 'stop') {
+        fail('не дошло до С/П: ' + res.result + ' за ' + res.steps + ' шагов');
+      }
+      if (o.x !== undefined && !near(ST.X, o.x)) {
+        fail('X = ' + show(ST.X) + ', ожидалось ' + show(o.x));
+      }
+      if (o.y !== undefined && !near(ST.Y, o.y)) {
+        fail('Y = ' + show(ST.Y) + ', ожидалось ' + show(o.y));
+      }
+      if (o.r0 !== undefined) {
+        var v0 = regOfBank(ext, 0, 0);
+        if (!near(v0, o.r0)) fail('R0 банка 0 = ' + show(v0) + ', ожидалось ' + show(o.r0));
+      }
+      if (o.bank1r0 !== undefined) {
+        var v1 = regOfBank(ext, 1, 0);
+        if (!near(v1, o.bank1r0)) fail('R0 банка 1 = ' + show(v1) + ', ожидалось ' + show(o.bank1r0));
+      }
+      if (o.page !== undefined) {
+        var pg = ext.page();
+        if (pg !== o.page) fail('страница = ' + pg + ', ожидалось ' + o.page);
+      }
+    });
+  });
+
+  /* ---------- директива .page ---------- */
+
+  add('.page 1: код ложится по адресу 105, первая страница пустая', function () {
+    var ext = makeExt();
+    var r = build(ext, '.page 1\n5');
+    if (!r.ok) fail('сборка не удалась: ' + r.errors.join('; '));
+    if (r.program[105] !== 0x05) {
+      fail('по адресу 105 лежит ' + MKCore.hex2(r.program[105]) + ', а не 05');
+    }
+    if (r.program[0] !== 0x54) {
+      fail('начало первой страницы не НОП: ' + MKCore.hex2(r.program[0]));
+    }
+  });
+
+  add('.page 1 при одной странице — ошибка сборки', function () {
+    var ext = makeExt();
+    var r = MKAsmEditor.buildProgram('.page 1\n5', {
+      core: ext.core, len: PAGE_SIZE, pageSize: PAGE_SIZE, pages: 1
+    });
+    if (r.ok) fail('сборка прошла, хотя страница одна и .page недоступна');
+  });
+
+  add('Повторная .page на занятую страницу — ошибка перекрытия', function () {
+    var ext = makeExt();
+    var r = build(ext, '.page 1\n5\n.page 1\n6');
+    if (r.ok) fail('вторая .page 1 прошла молча, хотя адрес уже занят');
+  });
+
+  add('Переход на метку чужой страницы — ошибка сборки', function () {
+    var ext = makeExt();
+    var r = build(ext, 'm: 5\n.page 1\nБП m');
+    if (r.ok) fail('БП на метку другой страницы собрался');
+  });
+
+  /* ---------- страница как состояние ---------- */
+
+  add('Сброс возвращает исполнение на страницу 0', function () {
+    var ex = exampleById('page1');
+    if (!ex) fail('нет примера page1');
+
+    var ext = makeExt();
+    load(ext, ex.src);
+    ext.run(20000);
+    if (ext.page() !== 1) fail('перед сбросом страница ' + ext.page() + ', ожидалась 1');
+
+    ext.core.reset(false);
+    if (ext.page() !== 0) fail('после сброса страница ' + ext.page() + ', ожидалась 0');
+    if (ext.ST.ip !== 0) fail('после сброса шаг ' + ext.ST.ip + ', ожидался 0');
+  });
+
+  add('Сброс не стирает программу ни на одной странице', function () {
+    var ex = exampleById('page1');
+    if (!ex) fail('нет примера page1');
+
+    var ext = makeExt();
+    load(ext, ex.src);
+    ext.core.reset(false);
+
+    if (ext.ST.prog[0] !== 0x01) {
+      fail('страница 0 после сброса начинается с ' + MKCore.hex2(ext.ST.prog[0]) + ', а не 01');
+    }
+    ext.selectPage(1);
+    if (ext.ST.prog[0] !== 0x03 || ext.ST.prog[1] !== 0x03) {
+      fail('страница 1 потеряла код 33: ' +
+        MKCore.hex2(ext.ST.prog[0]) + ' ' + MKCore.hex2(ext.ST.prog[1]));
+    }
+  });
+
+  add('Загрузка программы начинается со страницы 0', function () {
+    var ext = makeExt();
+    ext.selectPage(2);
+    if (ext.page() !== 2) fail('переключение на страницу 2 не сработало');
+
+    load(ext, 'С/П');
+    if (ext.page() !== 0) fail('страница после загрузки ' + ext.page() + ', ожидалась 0');
+    if (ext.ST.prog[0] !== 0x50) {
+      fail('по адресу 00 лежит ' + MKCore.hex2(ext.ST.prog[0]) + ', а не 50 (С/П)');
+    }
+  });
+
+  /* ---------- прогон ---------- */
+
+  for (var t = 0; t < tests.length; t++) {
+    var li = document.createElement('li');
+    var nameEl = document.createElement('span');
+    nameEl.textContent = tests[t].name;
+    li.appendChild(nameEl);
+    try {
+      tests[t].fn();
+      passed++;
+      var okm = document.createElement('span');
+      okm.className = 'm';
+      okm.textContent = ' — ✅';
+      li.appendChild(okm);
+    } catch (e) {
+      failed++;
+      var bad = document.createElement('span');
+      bad.className = 'x';
+      bad.textContent = ' — ❌';
+      li.appendChild(bad);
+      var err = document.createElement('span');
+      err.className = 'err';
+      err.textContent = e && e.message ? e.message : String(e);
+      li.appendChild(err);
+    }
+    list.appendChild(li);
+  }
+
+  sum.textContent = passed + ' из ' + tests.length + ' зелёные' +
+    (failed ? ' · ' + failed + ' красных' : '');
+  sum.className = 'sum ' + (failed ? 'bad' : 'ok');
+})();
+</script>
+</body>
+</html>

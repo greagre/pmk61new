@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>pmk61 — тесты библиотеки</title>
+<style>
+  :root { --ok:#1a7f37; --bad:#c62828; --line:#d5d8dc; }
+  * { box-sizing: border-box; }
+  body { margin:0; padding:18px 14px 40px; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; font-size:15px; color:#1b1f23; background:#f6f7f9; line-height:1.45; }
+  h1 { font-size:19px; margin:0 0 4px; }
+  .sub { color:#5b6570; font-size:13px; margin-bottom:14px; }
+  button { font:inherit; font-weight:600; padding:11px 18px; border:0; border-radius:10px; background:#2563eb; color:#fff; cursor:pointer; }
+  button:active { background:#1d4ed8; }
+  #summary { margin:14px 0 10px; font-weight:700; font-size:16px; }
+  .pass { color: var(--ok); }
+  .fail { color: var(--bad); }
+  table { width:100%; border-collapse:collapse; background:#fff; font-size:13px; }
+  th, td { border:1px solid var(--line); padding:7px 8px; text-align:left; vertical-align:top; }
+  th { background:#eef0f3; font-size:12px; }
+  td.mark { width:26px; text-align:center; font-weight:700; }
+  td.mark.ok { color: var(--ok); }
+  td.mark.bad { color: var(--bad); }
+  tr.known td { background:#f6f2fd; }
+  tr.group td { background:#e8eef7; font-weight:700; font-size:12px; }
+  .hex { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; white-space:nowrap; }
+  .note { margin-top:16px; color:#5b6570; font-size:12px; }
+  .err { color: var(--bad); font-weight:600; }
+  .hintbox { background:#eef4ff; border:1px solid #c4d6f5; border-radius:10px; padding:10px 12px; margin:0 0 14px; font-size:13px; }
+  .debt { background:#f4f1fb; border:1px solid #cdc2ec; border-radius:10px; padding:10px 12px; margin:0 0 14px; font-size:13px; }
+  .done { background:#eef8f0; border:1px solid #bfe0c6; border-radius:10px; padding:10px 12px; margin:0 0 14px; font-size:13px; }
+  .warn { background:#fff3cd; border:1px solid #e0c068; border-radius:10px; padding:10px 12px; margin:0 0 14px; font-size:13px; }
+</style>
+</head>
+<body>
+
+<h1>pmk61 — тесты библиотеки</h1>
+<div class="sub">Проверяется <span class="hex">library.js</span> ревизии 2: «Перед пуском», выгрузка TXT, разбор TXT при импорте, сохранение и возврат программы вместе с регистрами, X и углом. Ядро проверяется отдельно — <a href="tests.html">tests.html</a>.</div>
+
+<div class="hintbox">
+  <b>Что считается правильным.</b> Ожидания записаны по договорённостям 34-го проекта:
+  «Перед пуском» перечисляет только регистры, прочитанные раньше записи; TXT содержит адрес,
+  десятичный код и подпись команды; загрузка возвращает программу, регистры, X и угол.
+</div>
+
+<div class="done">
+  <b>Долгов нет.</b> Закрыты оба прежних:<br>
+  1. Коды <span class="hex">4F</span> и <span class="hex">6F</span> теперь адресуют R0 — младшая цифра F нормализуется до сверки с профилем.<br>
+  2. X возвращается из TXT — строка «Результат на момент сохранения» пишется всегда и читается обратно.
+</div>
+
+<div id="stale"></div>
+<button id="go">Прогнать все</button>
+<div id="summary">—</div>
+<table id="out">
+  <thead>
+    <tr><th></th><th>Проверка</th><th>Ожидание</th><th>Факт</th></tr>
+  </thead>
+  <tbody></tbody>
+</table>
+
+<div class="note">
+  Прогон идёт в браузере, ничего никуда не отправляется. Рядом должны лежать
+  <span class="hex">core.js</span>, <span class="hex">profiles.js</span>, <span class="hex">library.js</span> ревизии 2
+  и <span class="hex">library-cases.js</span> ревизии 3.
+</div>
+
+<script src="core.js?v=11"></script>
+<script src="profiles.js?v=11"></script>
+<script src="library.js?v=2"></script>
+<script src="library-cases.js?v=3"></script>
+<script>
+(function () {
+  'use strict';
+
+  var CASES = window.LIB_CASES || [];
+  var NEED_LIB = 2;
+
+  function checkFresh() {
+    var el = document.getElementById('stale');
+    el.innerHTML = '';
+    var bad = [];
+    if (typeof window.MKCore === 'undefined' || typeof window.MKProfiles === 'undefined' ||
+        typeof window.PMK61Lib === 'undefined' || !CASES.length) {
+      el.innerHTML = '<div class="warn"><b>Не загрузились файлы.</b><br>' +
+        'Нужны core.js, profiles.js, library.js и library-cases.js рядом с этой страницей.</div>';
+      return false;
+    }
+    if (window.PMK61Lib.version !== NEED_LIB) {
+      bad.push('версия библиотеки: ' + window.PMK61Lib.version + ', ожидалась ' + NEED_LIB);
+    }
+    if (CASES.length !== 39) {
+      bad.push('кейсов загружено: ' + CASES.length + ', ожидалось 39 — значение кэшировано');
+    }
+    if (!window.MKProfiles.get('mk-61')) bad.push('нет профиля mk-61');
+    if (bad.length) el.innerHTML = '<div class="warn"><b>Старая копия файлов в кэше браузера.</b><br>' +
+      bad.join('<br>') + '<br>Потяни страницу вниз для перезагрузки или открой в приватном окне.</div>';
+    return true;
+  }
+
+  function go() {
+    var tbody = document.querySelector('#out tbody');
+    var summary = document.getElementById('summary');
+    tbody.innerHTML = '';
+    summary.className = '';
+    summary.textContent = '—';
+
+    if (!checkFresh()) {
+      summary.className = 'fail';
+      summary.textContent = 'Файлы не загрузились — прогонять нечего';
+      return;
+    }
+
+    var passed = 0, total = 0, debt = 0, debtLeft = 0, html = '', lastGroup = '';
+
+    CASES.forEach(function (c) {
+      var got, ok = false;
+      try {
+        got = String(c.run());
+        ok = got === c.expect;
+      } catch (e) {
+        got = 'сбой: ' + e.message;
+      }
+
+      if (c.known) { debt++; if (!ok) debtLeft++; }
+      else { total++; if (ok) passed++; }
+
+      if (c.g !== lastGroup) {
+        html += '<tr class="group"><td></td><td colspan="3">' + c.g + '</td></tr>';
+        lastGroup = c.g;
+      }
+
+      var mark = c.known ? (ok ? '✓' : '!') : (ok ? '✓' : '✗');
+      var cls = c.known ? '' : (ok ? 'ok' : 'bad');
+      var note = c.known
+        ? '<br><span style="color:#7c5cbf;font-size:12px">долг: ' + (ok ? 'закрыт' : 'ещё не исправлено') + '</span>'
+        : '';
+
+      html += '<tr' + (c.known ? ' class="known"' : '') + '>' +
+        '<td class="mark ' + cls + '">' + mark + '</td>' +
+        '<td>' + c.name + note + '</td>' +
+        '<td class="hex">' + (c.expect === '' ? '(пусто)' : c.expect) + '</td>' +
+        '<td' + (!ok && !c.known ? ' class="err"' : '') + '>' + (got === '' ? '(пусто)' : got) + '</td>' +
+        '</tr>';
+    });
+
+    tbody.innerHTML = html;
+
+    var txt = 'Пройдено ' + passed + ' из ' + total;
+    if (debt) txt += ' · долг: ' + debtLeft + ' из ' + debt;
+    else txt += ' · долгов нет';
+    summary.className = passed === total ? 'pass' : 'fail';
+    summary.textContent = txt;
+  }
+
+  document.getElementById('go').addEventListener('click', go);
+  go();
+})();
+</script>
+</body>
+</html>
