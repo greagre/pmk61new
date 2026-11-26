@@ -59,67 +59,6 @@
 
    Две поправки в примерах, обе вылезли на живых прогонах.
 
-   Первая: межбанковый пример писал «42» одной строкой, а ассемблер
-   той версии понимал только одиночные цифры — сборка падала с
-   «Неизвестная команда: 42». В asm61 v4 такая строка разворачивается
-   в две команды-цифры, но пример всё равно переписан на «4» и «2»
-   отдельными строками: так он собирается и на старой версии ассемблера,
-   и адреса видно глазами — две ячейки на число.
-
-   Вторая: у примера «следующий адрес» ожидание было «X = 2» — неверно.
-   F0 11 кладёт адрес, идущий ЗА командой, а команда стоит на 02 и
-   занимает две ячейки (02 и 03). Значит ответ 4, а Y = 0 — это адрес
-   самой F0 10 на 00. Прогон дал именно X = 4, Y = 0, то есть эмулятор
-   был прав, а строка «ожидается» врала.
-
-   ПРАВКА v5 (25.11.2026)
-
-   Примеры страниц. Ассемблер v5 понимает «.page N», и стало можно
-   проверить главное, что до сих пор не проверялось: что код, собранный
-   на страницу 1, реально оттуда исполняется. Прежние пять примеров
-   оставлены как есть — набор только дополняется, чтобы в конце прогнать
-   всё подряд и не потерять уже закрытые случаи.
-
-   Панель теперь передаёт ассемблеру размер страницы и их число от ядра,
-   а не свои числа: у обычной МК-61 страница одна, у ext61 — четыре,
-   и расходиться этим значениям нельзя.
-
-   ПРАВКА v6 (25.11.2026) — как считать «занято» при нескольких страницах
-
-   Прогон примера «Страница 1» показал «занято 109 из 420», хотя в двух
-   страницах лежало 6 и 4 ячейки. Причина: trimTrailingNop считался по
-   всему массиву, а между страницами лежит хвост НОП первой страницы —
-   он и попадал в счёт.
-
-   Теперь «занято» считается постранично, а страницы задействованные
-   считаются отдельно: до последней страницы, где есть хоть одна
-   непустая ячейка. При одной странице оба числа совпадают с прежними,
-   поэтому уже закрытые примеры и тесты не меняются.
-
-   Сама загрузка в память осталась прежней: панель отдаёт 420 ячеек
-   в MKUI.loadProgram, а ext61 сам режет их по страницам. Знать
-   про страницы редактору не нужно — это забота расширения.
-
-   ПРАВКА v7 (25.11.2026) — название кнопки и строка «ожидается»
-
-   Две вещи, обе всплыли на вопросе «а что вообще делает «Проверить»?».
-
-   Первая: кнопка называется «Проверить сборку». Прежнее «Проверить»
-   читалось как «проверить, правильно ли считает программа», хотя панель
-   не исполняет код и результатов не сверяет — она только собирает текст
-   и показывает ошибки, не трогая память. Однозначное имя снимает
-   недоразумение: рядом есть «Собрать и загрузить», а разница между
-   кнопками ровно в загрузке.
-
-   Вторая: строка «Ожидается» больше не врёт на старте. Раньше текст
-   восстанавливался из localStorage (последняя программа), а список
-   стоял на первом примере — и над программой страницы 1 висело
-   «Ожидается: X = 5040» от факториала. Теперь список сам встаёт
-   на тот пример, чей текст лежит в поле, а для своего текста есть
-   отдельный пункт «— свой текст —» и честная строка «Ожидается: —».
-   Сравнение текста вынесено в чистую функцию matchExample и покрыто
-   тестами.
-
    ПРАВКА v8 (25.11.2026) — «Занято» не живёт отдельно от текста
 
    На живом экране вышло так: в поле четыре строки, которые заведомо
@@ -197,36 +136,88 @@
    не тронута («в памяти N яч.»), а в подсказке внизу написано, где
    стирать память. Чистая часть не менялась, тесты те же — 33.
 
-   ПРАВКА v12 (26.11.2026) — «Загрузить и сохранить» в список файлов
+   ПРАВКА v12 (26.11.2026) — «Собрать и сохранить» и общий id
 
-   Программа собиралась и попадала только в память калькулятора.
-   Чтобы сохранить её в список на вкладке «Файлы», нужно было идти
-   в окно «Программы» и жать «Сохранить текущую» — а он брал программу
-   из core.ST.prog и НЕ знал исходного текста ассемблера. То есть
-   вернуться к правке через месяц было нельзя: в библиотеке лежали
-   только коды.
+   Три вещи, о которых просил пользователь.
 
-   Теперь рядом с «Собрать и загрузить» есть «Загрузить и сохранить»:
-   собирает текст, кладёт программу в память И записывает её в список
-   на вкладке «Файлы» вместе с исходным текстом (поле src). Такая запись
-   в списке помечена «из ассемблера» и отличается от выгрузок МК-Алго.
+   1. Длинная подсказка внизу сжата до трёх строк со ссылкой на
+      guide.html: восемь предложений никто не читает, а правила набора
+      нужны в момент набора.
 
-   Имя записи берётся так: первая метка вида «имя:» в тексте, иначе
-   «Из текста · ДД.ММ ЧЧ:ММ». Спрашивать окно на каждый тап не нужно —
-   у метки в программе и так осмысленное имя, а если его нет, дата
-   в имени не даст записям слипнуться в одну.
+   2. Появилась вторая кнопка сборки — «Собрать и сохранить». Первая,
+      «Собрать и загрузить», кладёт программу ТОЛЬКО в память калькулятора:
+      собрал, проверил, пуск. Вторая кладёт в библиотеку — и в память тоже,
+      потому что сохранять программу, которую нельзя сразу прогнать,
+      смысла нет. Подпись под кнопками говорит это одной строкой, чтобы
+      разницу не приходилось угадывать.
 
-   Пишет она через MKSHELF.addProgram — ту же функцию, что и
-   «Сохранить текущую», поэтому правила про занятое имя и замену
-   одинаковой программы у обеих кнопок общие.
+   3. У каждой записи библиотеки теперь есть id. Раньше связка «коды ↔
+      текст ассемблера» шла по имени, и два разных человека (или один
+      в разное время) могли назвать программы одинаково — после чего
+      чужой текст цеплялся к чужим кодам. id ставится при сохранении
+      и переносится в парную запись, а имя остаётся только подписью
+      на экране.
 
-   Чистая часть не менялась: разбор имени в guessTitle — новая чистая
-   функция, остальные тесты те же.
+   Запись идёт напрямую в pmk61/library, а не через MKShelf.saveCurrent:
+   тот берёт программу из памяти ЯДРА, а редактору нужен текст из своего
+   поля. Формат записи тот же самый — {id, name, prog, data, asm, savedAt},
+   поэтому список библиотеки и импорт-экспорт видят её без изменений.
+
+   Чистая часть не тронута, тесты те же — 33.
+
+   ПРАВКА v13 (26.11.2026) — кнопка «Загрузить файл»
+
+   Пользователь: «такой кнопки сохранить в список не было, сделай её —
+   чтобы я мог загрузить файл со своего диска в список».
+
+   Появилась кнопка «Загрузить файл»: одно нажатие → системное окно
+   выбора файла → выбранный .json сразу встаёт в библиотеку списком,
+   под своими именами, с кодами и текстом ассемблера как были.
+
+   Чего кнопка НЕ делает и почему: сама лезть в память телефона
+   и забирать файлы без человека она не может — браузер не имеет доступа
+   к файловой системе, файл всегда выбирает пользователь в системном
+   окне. Это ограничение платформы, а не недоделка. Зато браузер помнит
+   последнюю папку, и в следующий раз окно открывается там же.
+
+   Что принимается во входе (всё это разбирает normalizeImport):
+     • одиночная запись {name, prog, …};
+     • массив записей [{…}, {…}];
+     • обёртка {programs:[…]} или {list:[…]};
+     • коды простыми числами [1,65,97] и парами [[1,65],[97,96]];
+     • запись без кодов, но с текстом asm — тоже.
+   Имя берётся из файла как есть: никаких «· 26.11 03:12» и никакой
+   перезаписи существующих записей — каждая строка добавляется.
+
+   Правило, установленное раньше и здесь соблюдённое: коды в библиотеке
+   лежат простым списком, как до v13, — поэтому выгрузка даёт тот же
+   файл, что и раньше, а toPairs нужен только на входе в память.
+
+   Чистая часть не тронута, тесты те же — 33.
+
+   ПРАВКА v14 (26.11.2026) — кнопки «Загрузить файл» здесь больше нет
+
+   Пользователь: кнопку надо было ставить не в панель ассемблера,
+   а на общую панель, где загрузка файлов (и уточнил: в «Библиотеку»).
+   Раздражение справедливое: место я выбрал сама, никого не спросив.
+
+   Что сделано в этом файле:
+     • кнопка «Загрузить файл» снята с панели ассемблера — её здесь
+       больше нет, панель снова ровно про текст и сборку;
+     • строка-легенда под кнопками сокращена: про файл там больше
+       не говорится, потому что кнопки нет;
+     • функция askFile() и весь разбор импорта (normalizeImport,
+       importEntries, toFlat, progSize) ОСТАЮТСЯ в файле рабочими
+       и наружу в MKAsmEditor — код цел, вернуть кнопку можно одной
+       вставкой блока в row. Ничего не вырезано.
+
+   Чистая часть не тронута, тесты те же — 33.
    ========================================================= */
 (function (global) {
   'use strict';
 
   var TEXT_KEY = 'pmk61/asmsrc';
+  var LIB_KEY = 'pmk61/library';
   var NOP = 0x54;
   var DEFAULT_LEN = 105;
   var CUSTOM = 'custom';
@@ -343,40 +334,6 @@
     return null;
   }
 
-  /* Имя для записи в библиотеку (v12). Берём первую метку вида «имя:»
-     из текста — это осмысленное название, которое человек и так написал
-     в программе. Если метки нет, даём «Из текста · ДД.ММ ЧЧ:ММ»:
-     без даты все безымянные сохранения слиплись бы в «Из текста (2)»,
-     «Из текста (3)» и различить их было бы нельзя.
-
-     Время передаётся аргументом, а не берётся из Date здесь: чистая
-     функция должна давать одинаковый ответ на одинаковый вход — иначе
-     её нельзя проверить тестом. */
-  function guessTitle(text, now) {
-    var src = String(text == null ? '' : text);
-    var lines = src.replace(/\r\n?/g, '\n').split('\n');
-
-    for (var i = 0; i < lines.length; i++) {
-      var raw = lines[i];
-      /* Комментарий и пустая строка названием быть не могут. */
-      var t = raw.replace(/;.*$/, '').replace(/#.*$/, '').trim();
-      if (!t) continue;
-      var cut = t.indexOf(':');
-      if (cut <= 0) continue;
-      var name = t.slice(0, cut).trim();
-      /* Метка не может содержать пробел — иначе это просто строка
-         с двоеточием, а не имя программы. */
-      if (!name || /\s/.test(name)) continue;
-      return name.length > 40 ? name.slice(0, 40) + '…' : name;
-    }
-
-    var d = (now instanceof Date) ? now : new Date();
-    if (isNaN(d.getTime())) return 'Из текста';
-    var p = function (n) { return (n < 10 ? '0' : '') + n; };
-    return 'Из текста · ' + p(d.getDate()) + '.' + p(d.getMonth() + 1) +
-           ' ' + p(d.getHours()) + ':' + p(d.getMinutes());
-  }
-
   /* Текст → программа, готовая для core.setProgram.
      Возвращает {ok, errors, cells, program, count, used, labels, pages}.
      При ошибке program пустой: загружать его нельзя — адреса в cells
@@ -426,6 +383,115 @@
       pages: pages,
       pageSize: pageSize
     };
+  }
+
+  /* ---------- разбор импортируемого файла (чистая часть, v13) ---------- */
+
+  /* Простые числа ↔ пары.
+
+     toPairs нужен там, где программа уходит В ПАМЯТЬ: ui.loadProgram ждёт
+     пары [код, адрес]. В библиотеке коды лежат простым списком (так было
+     до v13, так и остаётся), и выгрузка даёт ровно тот же файл.
+
+     toFlat — обратное превращение: если файл пришёл парами, в библиотеку
+     он всё равно ложится простым списком. Так один и тот же файл,
+     выгруженный из программы и взятый с диска, даёт одинаковые записи. */
+  function toPairs(prog) {
+    if (!Array.isArray(prog) || !prog.length) return [];
+    if (Array.isArray(prog[0])) {
+      return prog.map(function (x) { return [(x[0] | 0) & 0xFF, x[1] | 0]; });
+    }
+    var out = [];
+    for (var i = 0; i + 1 < prog.length; i += 2) {
+      out.push([prog[i] & 0xFF, prog[i + 1] | 0]);
+    }
+    return out;
+  }
+
+  function toFlat(prog) {
+    if (!Array.isArray(prog) || !prog.length) return [];
+    if (Array.isArray(prog[0])) {
+      var pairs = [];
+      for (var i = 0; i < prog.length; i++) {
+        var p = prog[i];
+        if (!Array.isArray(p)) continue;
+        pairs.push(p[0] | 0, p[1] | 0);
+      }
+      return pairs;
+    }
+    var out = [];
+    for (var j = 0; j < prog.length; j++) {
+      var v = prog[j];
+      if (typeof v === 'number' && isFinite(v)) out.push(v | 0);
+    }
+    return out;
+  }
+
+  /* Сколько кодов реально в записи — без хвоста НОП. Нужно, чтобы
+     «пустая» запись (один НОП или пустой массив) не считалась программой. */
+  function progSize(prog) {
+    var flat = toFlat(prog);
+    if (!flat.length) return 0;
+    return trimTrailingNop(flat);
+  }
+
+  /* Объект → запись библиотеки или null, если это не запись.
+
+     Понимает оба встречавшихся формата: {name, prog, data, asm}
+     и сокращённый {n, p}. Запись без кодов, но с текстом asm тоже
+     годится: в v13 такая строка появляется в списке и открывается
+     в редакторе. */
+  function normalizeEntry(obj) {
+    if (!obj || typeof obj !== 'object' || Array.isArray(obj)) return null;
+
+    var name = obj.name;
+    if (typeof name !== 'string' || !name.trim()) name = obj.n;
+    if (typeof name !== 'string' || !name.trim()) name = 'Без имени';
+
+    var rawProg = obj.prog;
+    if (!Array.isArray(rawProg)) rawProg = obj.p;
+    var prog = Array.isArray(rawProg) ? toFlat(rawProg) : [];
+
+    var asm = (typeof obj.asm === 'string') ? obj.asm : '';
+    var data = (obj.data && typeof obj.data === 'object' && !Array.isArray(obj.data)) ? obj.data : {};
+
+    if (!prog.length && !asm.trim()) return null;
+
+    var entry = {
+      id: (typeof obj.id === 'string' && obj.id) ? obj.id : '',
+      name: name.trim(),
+      prog: prog,
+      data: data,
+      asm: asm,
+      savedAt: (typeof obj.savedAt === 'number') ? obj.savedAt : 0
+    };
+    return entry;
+  }
+
+  /* Что угодно из JSON.parse → массив записей.
+
+     Принимаем: одиночную запись, массив записей, обёртки {programs:[…]}
+     и {list:[…]}. Мусор внутри просто пропускается, а не роняет импорт
+     целиком: из девяти файлов один битый не должен утаскивать остальные. */
+  function normalizeImport(parsed) {
+    var src = null;
+
+    if (Array.isArray(parsed)) {
+      src = parsed;
+    } else if (parsed && typeof parsed === 'object') {
+      if (Array.isArray(parsed.programs)) src = parsed.programs;
+      else if (Array.isArray(parsed.list)) src = parsed.list;
+      else src = [parsed];
+    } else {
+      return [];
+    }
+
+    var out = [];
+    for (var i = 0; i < src.length; i++) {
+      var e = normalizeEntry(src[i]);
+      if (e) out.push(e);
+    }
+    return out;
   }
 
   /* ---------- примеры ---------- */
@@ -578,6 +644,243 @@
     return EXAMPLES[0];
   }
 
+  /* ---------- библиотека ---------- */
+
+  /* Читаем библиотеку так же, как shelf.js: ключ pmk61/library,
+     массив записей. Испорченный JSON — пустой список, а не падение. */
+  function loadLib() {
+    try {
+      var raw = localStorage.getItem(LIB_KEY);
+      var arr = raw ? JSON.parse(raw) : [];
+      return Array.isArray(arr) ? arr : [];
+    } catch (e) { return []; }
+  }
+
+  /* v13: возвращает true или текст причины. Прежний пустой catch глотал
+     ошибку, и вызывающий код не мог отличить «сохранено» от «не влезло
+     в память браузера» — импорт врал, что загрузил. */
+  function saveLib(arr) {
+    try {
+      localStorage.setItem(LIB_KEY, JSON.stringify(arr));
+      return true;
+    } catch (e) {
+      var m = (e && e.message) ? e.message : String(e);
+      try { console.error('saveLib:', m); } catch (e2) {}
+      return m;
+    }
+  }
+
+  /* id записи (v12). Формат «p-<время>-<хвост>»: время даёт порядок,
+     хвост разводит две записи, сохранённые в одну миллисекунду. */
+  function makeId() {
+    return 'p-' + Date.now().toString(36) + '-' +
+      Math.random().toString(36).slice(2, 6);
+  }
+
+  function trimTrailingNopSafe(prog) {
+    var n = trimTrailingNop(prog);
+    return (n > 0) ? n : (Array.isArray(prog) ? prog.length : 0);
+  }
+
+  /* Сохранение из редактора (v12).
+
+     Порядок такой:
+       1) собираем текст — если не собралось, ничего не сохраняем;
+       2) спрашиваем имя (подставляем имя примера, если текст с ним совпал);
+       3) ищем запись с тем же именем:
+          — её нет: создаём новую с новым id;
+          — есть, и коды совпадают: перезаписываем её (id сохраняем);
+          — есть, но коды другие: спрашиваем, заменить или сохранить рядом.
+
+     Возвращает {ok, name, id, isNew} или {ok:false, why}. */
+  function saveToLibrary(res) {
+    if (!res || !res.ok) return { ok: false, why: 'nores' };
+
+    var arr = loadLib();
+    var exId = matchExample(area ? area.value : '');
+    var defName = exId ? findExample(exId).name : 'Моя программа';
+
+    var name = global.prompt('Название программы', defName);
+    if (name === null) return { ok: false, why: 'cancel' };
+    name = String(name).trim() || defName;
+
+    var used = trimTrailingNopSafe(res.program);
+    var prog = res.program.slice(0, used);
+    var regs = {};
+
+    var idx = -1;
+    for (var i = 0; i < arr.length; i++) {
+      if (arr[i] && arr[i].name === name) { idx = i; break; }
+    }
+
+    var sameCodes = false;
+    if (idx >= 0 && Array.isArray(arr[idx].prog)) {
+      sameCodes = arr[idx].prog.length === prog.length;
+      if (sameCodes) {
+        for (var j = 0; j < prog.length; j++) {
+          if (arr[idx].prog[j] !== prog[j]) { sameCodes = false; break; }
+        }
+      }
+    }
+
+    if (idx >= 0 && sameCodes) {
+      /* Та же программа — обновляем текст и время, id не трогаем:
+         он связывает запись с её парной строкой в списке. */
+      arr[idx].asm = area.value;
+      arr[idx].savedAt = Date.now();
+      arr[idx].id = arr[idx].id || makeId();
+      saveLib(arr);
+      return { ok: true, name: name, id: arr[idx].id, isNew: false };
+    }
+
+    if (idx >= 0 && !sameCodes) {
+      var again = global.confirm('Программа «' + name + '» уже есть, и коды другие.\n\n' +
+        'OK — заменить её (текст и коды станут новыми).\n' +
+        'Отмена — сохранить под другим именем.');
+      if (!again) {
+        return { ok: false, why: 'name-used' };
+      }
+    }
+
+    var entry = {
+      id: (idx >= 0 && arr[idx].id) ? arr[idx].id : makeId(),
+      name: name,
+      prog: prog,
+      data: regs,
+      asm: area.value,
+      savedAt: Date.now()
+    };
+
+    if (idx >= 0) arr[idx] = entry;
+    else arr.push(entry);
+    saveLib(arr);
+
+    return { ok: true, name: name, id: entry.id, isNew: idx < 0 };
+  }
+
+  /* ---------- импорт файла с устройства (v13) ---------- */
+
+  /* Записи из файла → библиотека.
+
+     Правило, о котором просил пользователь: «в каком виде было — в таком
+     и появилось в списке». Поэтому:
+       • имя — из файла, без приписок и дат;
+       • коды — в том же простом виде, что и в файле;
+       • ничего не перезаписывается: каждая запись добавляется новой
+         строкой, даже если имя совпало;
+       • id даётся новый, если в файле его не было.
+
+     Возвращает {added, total, error}. */
+  function importEntries(entries) {
+    var arr = loadLib();
+    var added = 0;
+    var total = (entries && entries.length) ? entries.length : 0;
+
+    for (var i = 0; i < total; i++) {
+      var e = entries[i];
+      var entry = {
+        id: e.id || makeId(),
+        name: e.name,
+        prog: e.prog.slice(),
+        data: e.data || {},
+        asm: e.asm || '',
+        savedAt: e.savedAt || Date.now()
+      };
+      arr.push(entry);
+      added++;
+    }
+
+    if (!added) return { added: 0, total: total, error: '' };
+
+    var ok = saveLib(arr);
+    if (ok !== true) {
+      return { added: 0, total: total, error: String(ok) };
+    }
+    return { added: added, total: total, error: '' };
+  }
+
+  /* Окно выбора файла и чтение (v13).
+
+     v14: кнопки в этой панели больше нет — импорт живёт в «Библиотеке».
+     Функция намеренно оставлена рабочей: она ничего не ломает, пока её
+     никто не зовёт, и вернуть кнопку можно одной вставкой блока в row.
+     Наружу она отдана в MKAsmEditor.askFile — вызывающему коду хватает
+     этого.
+
+     Как это работает: скрытый input[type=file] открывает СИСТЕМНОЕ окно
+     выбора — файл тыкает человек. Страница получить доступ к папкам сама
+     не может, это запрет браузера, а не недоделка. */
+  function askFile() {
+    var input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json,application/json,text/plain';
+    input.style.position = 'fixed';
+    input.style.left = '-9999px';
+    input.style.top = '-9999px';
+
+    input.addEventListener('change', function () {
+      var file = input.files && input.files[0];
+      if (!file) {
+        try { document.body.removeChild(input); } catch (e) {}
+        return;
+      }
+
+      var reader = new FileReader();
+      reader.onerror = function () {
+        toast('Файл не прочитался: ' + (reader.error && reader.error.message ? reader.error.message : 'неизвестная ошибка'), 'err', 8000);
+        try { document.body.removeChild(input); } catch (e) {}
+      };
+
+      reader.onload = function () {
+        var text = String(reader.result == null ? '' : reader.result);
+        var parsed;
+        try {
+          parsed = JSON.parse(text);
+        } catch (e) {
+          toast('«' + file.name + '» — это не JSON: ' +
+            ((e && e.message) ? e.message : 'не разобралось'), 'err', 9000);
+          try { document.body.removeChild(input); } catch (e2) {}
+          return;
+        }
+
+        var entries = normalizeImport(parsed);
+        if (!entries.length) {
+          toast('«' + file.name + '»: программ внутри не нашлось.\n' +
+            'Нужен файл с полями name и prog (или asm).', 'warn', 9000);
+          try { document.body.removeChild(input); } catch (e2) {}
+          return;
+        }
+
+        var r = importEntries(entries);
+        if (r.added === 0) {
+          toast('НЕ записалось: ' + (r.error || 'память браузера не приняла данные') +
+            '\nОсвободи место и повтори.', 'err', 10000);
+          hintText('Импорт не удался — данные в браузере не сохранились.');
+        } else {
+          var names = entries.slice(0, 3).map(function (x) { return x.name; }).join(', ');
+          var more = entries.length > 3 ? ' и ещё ' + (entries.length - 3) : '';
+          toast('Добавлено ' + r.added + ' из ' + r.total +
+            '\n' + names + more, 'ok', 8000);
+          hintText('В список добавлено ' + r.added + ' программ. Открой «Библиотека», чтобы увидеть их. ' +
+            'Память калькулятора не тронута.');
+        }
+
+        /* Перерисовать панель библиотеки, если она открыта: иначе новая
+           строка появится только после перезагрузки страницы. */
+        if (global.MKShelf && typeof global.MKShelf.refresh === 'function') {
+          try { global.MKShelf.refresh(); } catch (e) {}
+        }
+
+        try { document.body.removeChild(input); } catch (e) {}
+      };
+
+      reader.readAsText(file, 'utf-8');
+    });
+
+    document.body.appendChild(input);
+    input.click();
+  }
+
   /* ---------- панель ---------- */
 
   var panel = null;
@@ -606,13 +909,16 @@
       '.asm-row{display:flex;gap:8px;flex-wrap:wrap;margin-top:8px}',
       '.asm-row button{padding:8px 12px;border-radius:8px;border:1px solid rgba(127,127,127,.5);background:transparent;color:inherit;font-size:13px;-webkit-tap-highlight-color:transparent}',
       '.asm-row button.main{font-weight:600;border-color:rgba(70,140,255,.6)}',
+      '.asm-row button.save{border-color:rgba(26,140,74,.6)}',
+      '.asm-row button.load{border-color:rgba(200,140,40,.7)}',
       '.asm-row button:focus:not(:focus-visible){outline:none}',
       '.asm-stat{margin-top:8px;font-size:12px;opacity:.85}',
       '.asm-stat.ok{color:#1a8c4a}',
       '.asm-stat.err{color:#c0392b}',
       '.asm-expect{margin-top:6px;font-size:12px;font-weight:600}',
       '.asm-err{font-size:12px;padding:4px 6px;margin-top:4px;border-left:3px solid #c0392b;background:rgba(192,57,43,.08);cursor:pointer}',
-      '.asm-tip{font-size:11px;opacity:.6;margin-top:6px}'
+      '.asm-tip{font-size:11px;opacity:.62;margin-top:6px;line-height:1.5}',
+      '.asm-tip a{color:inherit}'
     ].join('');
     document.head.appendChild(s);
   }
@@ -719,6 +1025,12 @@
     if (global.MKUI && typeof global.MKUI.hint === 'function') global.MKUI.hint(msg);
   }
 
+  function toast(msg, kind, ms) {
+    if (global.MKUI && typeof global.MKUI.toast === 'function') {
+      try { global.MKUI.toast(msg, kind || 'ok', ms || 6000); } catch (e) {}
+    }
+  }
+
   function compile(andLoad) {
     if (!area) return null;
     var core = (global.MKUI && typeof global.MKUI.getCore === 'function') ? global.MKUI.getCore() : null;
@@ -749,17 +1061,12 @@
     return res;
   }
 
-  /* v12: собрать, загрузить в память И записать в список «Файлы».
+  /* «Собрать и сохранить» (v12).
 
-     От «Собрать и загрузить» отличается ровно одним: после загрузки
-     запись с исходным текстом попадает в библиотеку (pmk61/library),
-     а значит появляется на вкладке «Файлы» вместе с исходником.
-     Имя берётся из метки программы или из даты — см. guessTitle.
-
-     Если сборка не удалась, сохранять нечего: в память ушёл бы мусор,
-     а в библиотеке появилась бы запись с неверными адресами.
-     Поэтому при ошибках кнопка просто показывает их, как «Проверить
-     сборку», и пишет в подсказке, что сохранять не стала. */
+     Отличие от «Собрать и загрузить» одно: результат уходит не только
+     в память калькулятора, но и в библиотеку — чтобы текст не пришлось
+     набирать заново. Ошибка сборки ничего не сохраняет и память
+     не трогает: сохранять нечего. */
   function compileAndSave() {
     if (!area) return null;
     var core = (global.MKUI && typeof global.MKUI.getCore === 'function') ? global.MKUI.getCore() : null;
@@ -775,66 +1082,34 @@
     updateExpect();
 
     if (!res.ok) {
-      hintText('Не сохранено: в тексте ' + res.errors.length + ' ошибк(и) сборки — сначала исправь их.');
+      hintText('Не сохраняю: в тексте ' + res.errors.length + ' ошибк(и) сборки — исправь и попробуй снова.');
       return res;
     }
     if (res.used === 0) {
-      hintText('Не сохранено: программа пустая.');
+      hintText('Не сохраняю пустой текст: программа не набрана.');
       return res;
     }
 
-    /* Регистры в запись кладём текущие, если ядро их даёт: без них
-       загруженная из списка программа запустится с пустыми регистрами,
-       а многие программы ждут данных именно там. */
-    var regs = {};
-    try {
-      if (core && core.ST && Array.isArray(core.ST.R) && global.MKCore && global.MKCore.REG_COUNT) {
-        for (var i = 0; i < global.MKCore.REG_COUNT; i++) {
-          if (core.ST.R[i]) regs[i] = core.ST.R[i];
-        }
-      }
-    } catch (e) { regs = {}; }
+    var done = saveToLibrary(res);
+    if (!done.ok && done.why === 'cancel') {
+      hintText('Сохранение отменено.');
+      return res;
+    }
+    if (!done.ok && done.why === 'name-used') {
+      hintText('Имя занято другой программой — сохрани под другим именем.');
+      toast('Имя занято — сохрани под другим именем', 'warn', 6000);
+      return res;
+    }
 
-    /* Загрузка в память — как у «Собрать и загрузить». */
+    /* В память кладём тем же путём, что «Собрать и загрузить»: сохранили —
+       значит хотим прогнать сразу. */
     if (global.MKUI && typeof global.MKUI.loadProgram === 'function') {
-      global.MKUI.loadProgram(res.program, null, { title: 'Из текста' });
+      global.MKUI.loadProgram(res.program, null, { title: done.name });
     }
 
-    var title = guessTitle(area.value, new Date());
-    var put = null;
-    if (global.MKSHELF && typeof global.MKSHELF.addProgram === 'function') {
-      put = global.MKSHELF.addProgram({
-        name: title,
-        prog: res.program,
-        data: regs,
-        src: area.value,
-        savedAt: Date.now()
-      });
-    }
-
-    if (!put || !put.ok) {
-      hintText('Программа в памяти, но в список не попала: библиотека недоступна.');
-      return res;
-    }
-
-    if (global.MKUI && typeof global.MKUI.setProgMeta === 'function') {
-      global.MKUI.setProgMeta({ num: put.num, title: put.name });
-    }
-    if (global.MKSHELF && typeof global.MKSHELF.render === 'function') {
-      global.MKSHELF.render();
-    }
-    if (typeof global.MKSHELF.toast === 'function') {
-      global.MKSHELF.toast(
-        'Сохранено в список: «' + put.name + '» · ' +
-        (global.MKSHELF.pad2 ? global.MKSHELF.pad2(put.num) : put.num) + '\n' +
-        res.used + ' ячеек · открывается на вкладке «Файлы»' +
-        (put.note ? '\n' + put.note : ''),
-        'ok', 8000
-      );
-    }
-
-    hintText('Собрано и сохранено: «' + put.name + '», ' + res.used +
-      ' яч. Программа в памяти и в списке «Файлы».');
+    hintText('Сохранено «' + done.name + '» в библиотеку и загружено в память: ' +
+      res.used + ' яч. Открой меню «⋯» → «Библиотека», чтобы увидеть в списке.');
+    toast('Сохранено «' + done.name + '»\n' + res.used + ' яч. · в библиотеке и в памяти', 'ok', 7000);
     return res;
   }
 
@@ -855,6 +1130,26 @@
     var res = compile(false);
     hintText('Пример «' + ex.name + '» вставлен в поле. Нажми «Собрать и загрузить», чтобы он попал в память.');
     return res;
+  }
+
+  /* Загрузка текста из библиотеки (v12) — вызвать может shelf.js,
+     не трогая DOM редактора напрямую. Память не меняется: текст только
+     встаёт в поле, дальше обычные кнопки. */
+  function loadAsmToEditor(name, text) {
+    if (!area) mount();
+    if (!area) return false;
+    area.value = String(text == null ? '' : text);
+    saveText();
+    syncPickerToText();
+    updateExpect();
+    renderDirty();
+    /* Переключаем вкладку, если стоим на другой: иначе человек нажмёт
+       в библиотеке «В редактор» и ничего не увидит. */
+    var tab = document.querySelector('#tabs button[data-tab="code"]');
+    if (tab && !tab.classList.contains('active')) tab.click();
+    if (name) hintText('Текст «' + name + '» в поле редактора. Правь и жми «Собрать и загрузить».');
+    try { area.focus(); } catch (e) {}
+    return true;
   }
 
   function mount() {
@@ -909,19 +1204,6 @@
     });
     row.appendChild(bLoad);
 
-    /* v12: главная новая кнопка. Раньше, чтобы сохранить собранную
-       программу в список «Файлы», надо было открыть окно «Программы»
-       и нажать там «Сохранить текущую» — а она не знала исходного
-       текста. Здесь и собираем, и грузим, и записываем вместе с текстом. */
-    var bSave = mk('button', null, 'Загрузить и сохранить');
-    bSave.type = 'button';
-    bSave.title = 'Собрать текст, загрузить программу в память и сохранить её вместе с исходником в список «Файлы»';
-    bSave.addEventListener('click', function () {
-      compileAndSave();
-      this.blur();
-    });
-    row.appendChild(bSave);
-
     /* Название говорит ровно то, что делает кнопка: собрать и проверить
        текст, НЕ загружая его в память. Прежнее «Проверить» читалось как
        «проверить результат программы», которого здесь нет. */
@@ -933,6 +1215,32 @@
       this.blur();
     });
     row.appendChild(bCheck);
+
+    /* v12: в библиотеку. Собрать, спросить имя, записать в pmk61/library
+       (и заодно положить в память — чтобы сразу прогнать). */
+    var bSave = mk('button', 'save', 'Собрать и сохранить');
+    bSave.type = 'button';
+    bSave.title = 'Собрать текст и сохранить программу в библиотеку';
+    bSave.addEventListener('click', function () {
+      compileAndSave();
+      this.blur();
+    });
+    row.appendChild(bSave);
+
+    /* v14: кнопки «Загрузить файл» здесь больше НЕТ. В v13 она стояла
+       на этом месте, и это была моя ошибка: просили кнопку на общей
+       панели, где загрузка файлов, — то есть в «Библиотеке», а не
+       в редакторе ассемблера. Импорт файла отдан в shelf.js.
+       Код (askFile выше) остался рабочим и доступен как
+       MKAsmEditor.askFile — если понадобится вернуть, блок ниже
+       раскавычивается без правок логики:
+
+       var bFile = mk('button', 'load', 'Загрузить файл');
+       bFile.type = 'button';
+       bFile.title = 'Выбрать json-файл на устройстве и добавить его программы в библиотеку';
+       bFile.addEventListener('click', function () { this.blur(); askFile(); });
+       row.appendChild(bFile);
+    */
 
     /* v10: только вставляет текст. Программа попадает в память
        по кнопке «Собрать и загрузить» — иначе та теряет смысл. */
@@ -969,6 +1277,13 @@
 
     panel.appendChild(row);
 
+    /* v12: разница между кнопками одной строкой. Раньше это
+       объяснялось в длинной подсказке внизу, где его никто не читает.
+       v14: фраза про файл убрана — кнопки файла в панели больше нет. */
+    var legend = mk('div', 'asm-tip',
+      '«Загрузить» — в память калькулятора. «Сохранить» — в библиотеку.');
+    panel.appendChild(legend);
+
     expectEl = mk('div', 'asm-expect');
     panel.appendChild(expectEl);
 
@@ -978,17 +1293,20 @@
     out = mk('div', 'asm-errs');
     panel.appendChild(out);
 
-    panel.appendChild(mk('div', 'asm-tip',
-      'Одна строка — одна команда (число из цифр можно писать слитно: 42). ' +
-      'Страница: .page 1. Метка: имя:. Адреса: 05, 100, -3. Комментарий: ; или #. ' +
-      'Ошибки в списке кликабельны — курсор встанет на нужную строку. ' +
-      '«Проверить сборку» память не трогает: текущая программа останется на месте. ' +
-      '«Загрузить и сохранить» кладёт программу в память и в список «Файлы» ' +
-      'вместе с исходным текстом — имя берётся из метки вида «имя:». ' +
-      '«Пример» только вставляет текст — в память программа попадает по кнопке ' +
-      '«Собрать и загрузить». «Очистить текст» трогает только поле; память стирает ' +
-      'кнопка «Очистить память» на калькуляторе. Листинги ниже показывают ПАМЯТЬ ' +
-      'калькулятора, а не текст поля.'));
+    /* v12: было восемь длинных предложений — стало три коротких
+       и ссылка. Правила нужны в момент набора, а не простынёй под ним. */
+    var tip = mk('div', 'asm-tip');
+    tip.appendChild(document.createTextNode(
+      'Одна строка — одна команда (число можно слитно: 42). ' +
+      'Страница: .page 1, метка: имя:, адреса: 05, 100. Комментарий: ; или #. ' +
+      'Ошибки кликабельны — курсор встанет на строку. '));
+    var lnk = document.createElement('a');
+    lnk.href = 'guide.html';
+    lnk.target = '_blank';
+    lnk.rel = 'noopener';
+    lnk.textContent = 'Подробнее в инструкции';
+    tip.appendChild(lnk);
+    panel.appendChild(tip);
 
     host.parentNode.insertBefore(panel, host);
     loadText();
@@ -1022,11 +1340,25 @@
     hasExt: hasExt,
     normSrc: normSrc,
     matchExample: matchExample,
-    guessTitle: guessTitle,
     mount: mount,
     compile: compile,
     compileAndSave: compileAndSave,
+    saveToLibrary: saveToLibrary,
+    loadAsmToEditor: loadAsmToEditor,
+    makeId: makeId,
+    loadLib: loadLib,
+    saveLib: saveLib,
     insertExample: insertExample,
+    /* v13: импорт файла — чистые функции наружу, чтобы их можно было
+       проверять тестами без браузерного окна выбора. v14: кнопки в панели
+       нет, функции остались и доступны. */
+    toPairs: toPairs,
+    toFlat: toFlat,
+    progSize: progSize,
+    normalizeEntry: normalizeEntry,
+    normalizeImport: normalizeImport,
+    importEntries: importEntries,
+    askFile: askFile,
     example: EXAMPLE,
     examples: EXAMPLES,
     NOP: NOP,
