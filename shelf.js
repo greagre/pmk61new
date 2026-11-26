@@ -28,6 +28,19 @@
 
    Ничего не считает само: вычисления в core.js, запуск — через
    мост window.MKUI из ui.js.
+
+   ПРАВКА v2 (26.11.2026) — сохранение из панели ассемблера
+
+   Раньше программа попадала в библиотеку единственным путём:
+   «Сохранить текущую» в окне «Программы», а он требовал режима ПРГ
+   и брал текст из core.ST.prog без исходника. Из панели ассемблера
+   (вкладка «Код») сохранить было нельзя вовсе — только набрать
+   программу клавишами или собрать её и снова открыть окно.
+
+   Теперь есть addProgram(entry) — общая запись в библиотеку, которую
+   вызывает и saveCurrent, и кнопка «Загрузить и сохранить» в asm-editor.js.
+   Поле src (исходный текст ассемблера) сохраняется вместе с программой,
+   поэтому в списке видно «из ассемблера», а не только «из МК-Алго».
    ========================================================= */
 (function () {
   'use strict';
@@ -286,7 +299,9 @@
       var meta = [];
       if (p.savedAt) meta.push('сохранено ' + fmtWhen(p.savedAt));
       else if (p.saved) meta.push('файл от ' + fmtWhen(p.saved));
-      if (p.src) meta.push('из МК-Алго');
+      if (p.src) {
+        meta.push(/^\s*;/.test(p.src) ? 'из ассемблера' : 'из МК-Алго');
+      }
       if (p.layout) {
         var keys = Object.keys(p.layout);
         if (keys.length) meta.push('переменные: ' + keys.join(', '));
@@ -434,6 +449,59 @@
     renderShelf();
   }
 
+  /* ---------- общая запись в библиотеку (v2) ---------- */
+
+  /* Положить запись в библиотеку и вернуть итог. Одна и та же функция
+     для «Сохранить текущую» и для кнопки «Загрузить и сохранить»
+     в панели ассемблера: иначе правила про занятое имя и замену
+     одинаковой программы пришлось бы держать в двух местах и они
+     рано или поздно разошлись бы.
+
+     entry: { name, prog: [], data: {}, src?: '…', savedAt?: ms }
+     Возвращает { ok, name, num, note, added, replaced }. */
+  function addProgram(entry) {
+    var arr = loadLib();
+    var prog = Array.isArray(entry && entry.prog) ? entry.prog.slice() : [];
+    if (!prog.length) {
+      return { ok: false, reason: 'нет программы' };
+    }
+
+    var name = String((entry && entry.name) || '').trim() || 'Моя программа';
+    var savedAt = entry.savedAt || Date.now();
+    var data = (entry.data && typeof entry.data === 'object') ? entry.data : {};
+
+    var e = { name: name, prog: prog, data: data, savedAt: savedAt };
+    if (entry.src) e.src = String(entry.src);
+
+    var idx = -1;
+    for (var k = 0; k < arr.length; k++) if (arr[k].name === name) { idx = k; }
+
+    var note = '';
+    var added = 0, replaced = 0;
+
+    if (idx < 0) {
+      arr.push(e);
+      added = 1;
+    } else if (sameProg(arr[idx].prog, e.prog)) {
+      arr[idx] = e;
+      replaced = 1;
+    } else {
+      var alt = freeName(arr, name + ' · ' + fmtShort(savedAt));
+      e.name = alt;
+      arr.push(e);
+      added = 1;
+      note = 'сохранено как «' + alt + '» — имя было занято';
+      name = alt;
+    }
+
+    saveLib(arr);
+
+    var pos = arr.map(function (x) { return x.name; }).indexOf(name);
+    var num = BUILTIN.length + pos + 1;
+
+    return { ok: true, name: name, num: num, note: note, added: added, replaced: replaced };
+  }
+
   /* ---------- сохранить текущую ---------- */
   function saveCurrent() {
     if (!window.MKUI) return;
@@ -465,33 +533,17 @@
     if (!name) return;
     name = String(name).trim() || 'Моя программа';
 
-    var entry = { name: name, prog: prog, data: regs, savedAt: Date.now() };
-    var idx = -1;
-    for (var k = 0; k < arr.length; k++) if (arr[k].name === name) idx = k;
+    var res = addProgram({ name: name, prog: prog, data: regs, savedAt: Date.now() });
+    if (!res.ok) return;
 
-    var note = '';
-    if (idx < 0) {
-      arr.push(entry);
-    } else if (sameProg(arr[idx].prog, entry.prog)) {
-      arr[idx] = entry;
-    } else {
-      var alt = freeName(arr, name + ' · ' + fmtShort(entry.savedAt));
-      entry.name = alt;
-      arr.push(entry);
-      note = '\nсохранено как «' + alt + '» — имя было занято';
-      name = alt;
-    }
-    saveLib(arr);
+    window.MKUI.setProgMeta({ num: res.num, title: res.name });
 
-    var pos = arr.map(function (x) { return x.name; }).indexOf(name);
-    var num = BUILTIN.length + pos + 1;
-    window.MKUI.setProgMeta({ num: num, title: name });
-
-    window.MKUI.hint('Сохранено «' + name + '» под номером ' + pad2(num) +
+    window.MKUI.hint('Сохранено «' + res.name + '» под номером ' + pad2(res.num) +
       ': ' + prog.length + ' ячеек, регистров ' + Object.keys(regs).length);
-    toast('Сохранено «' + name + '» · ' + pad2(num) + '\n' +
+    toast('Сохранено «' + res.name + '» · ' + pad2(res.num) + '\n' +
       prog.length + ' ячеек · ' + regsText(regs) + '\n' +
-      'в списке: ' + fmtWhen(entry.savedAt) + note, 'ok', 8000);
+      'в списке: ' + fmtWhen(res.savedAt || Date.now()) +
+      (res.note ? '\n' + res.note : ''), 'ok', 8000);
     renderShelf();
   }
 
@@ -675,6 +727,10 @@
     takeBridge: takeBridge,
     toast: toast,
     fmtWhen: fmtWhen,
+    render: renderShelf,
+    addProgram: addProgram,
+    loadLib: loadLib,
+    pad2: pad2,
     formatFile: function (list) {
       return {
         app: 'pmk61',
