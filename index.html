@@ -1,408 +1,246 @@
-/* =========================================================
-   pmk61 / asm61.js — ассемблер МК-61
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#d7d3c4">
+<title>ЭЛЕКТРОНИКА МК-61 — эмулятор</title>
+<link rel="stylesheet" href="layout.css?v=1">
+</head>
+<body data-theme="classic" data-mode="study" data-tab="num">
+<div class="app">
+  <div class="top">
+    <label for="model">Модель</label>
+    <select id="model" aria-label="Модель калькулятора"></select>
+    <button type="button" class="topbtn" id="themeBtn" title="Тема">▤</button>
+    <button type="button" class="topbtn" id="shelfOpen" title="Библиотека программ">☰</button>
+  </div>
 
-   ЗАЧЕМ
+  <div class="calc">
+    <div class="brand"><span>ЭЛЕКТРОНИКА</span><span id="modelName">МК-61</span></div>
 
-   До этого файла программу можно было набрать только клавишами, команда
-   за командой, а переходы считались вручную по адресам. Строка «F L0 08»
-   требовала знать, что метка цикла окажется на 08, и что каждая команда
-   занимает ровно одну ячейку (кроме F0 и переходов — они двухбайтные).
-   Ошибка на единицу — и программа уходила в никуда без всяких сообщений.
+    <div class="screen">
+      <div class="lcd" id="lcd">0</div>
+      <div class="lcd-sub">
+        <span>режим: <b id="stMode">АВТ</b></span>
+        <span>слой: <b id="stLayer">—</b></span>
+        <span>угол: <b id="stAngle">Г</b></span>
+        <span>адрес: <b id="stStep">00</b></span>
+      </div>
+    </div>
 
-   Здесь текст превращается в ячейки в два прохода: первый считает адреса
-   и раскладывает их по меткам, второй подставляет найденные адреса
-   в команды перехода. Если метка не нашлась — это ошибка сборки
-   с номером строки, а не молчаливый ноль.
+    <div class="angseg" id="angseg" role="group" aria-label="Единица измерения угла, как переключатель Р-ГРД-Г">
+      <span class="anglab">угол</span>
+      <button type="button" data-angle="deg" title="Градусы — полный оборот 360">Г</button>
+      <button type="button" data-angle="grad" title="Грады — полный оборот 400">ГРД</button>
+      <button type="button" data-angle="rad" title="Радианы — полный оборот 2π">Р</button>
+    </div>
 
-   ЧИСТАЯ ЧАСТЬ
+    <button type="button" class="progtag" id="progTag" hidden>
+      <span class="ptag-num" id="progTagNum">01</span>
+      <span class="ptag-name" id="progTagName">n! — факториал</span>
+      <span class="ptag-go">☰</span>
+    </button>
 
-   Файл не трогает ни DOM, ни localStorage, ни ядро: на входе текст,
-   на выходе {ok, cells, labels, count, errors}. Поэтому его проверяет
-   tests-asm.html — в браузере, но без калькулятора.
+    <div class="keys" id="keys"></div>
 
-   ЧТО ПОНИМАЕТСЯ В ТЕКСТЕ
+    <div class="service" id="service"></div>
 
-     • одна строка — одна команда; число из нескольких цифр пишется
-       слитно: «42» — это две команды-цифры 4 и 2, как двумя клавишами;
-     • комментарий: «;» или «#» до конца строки;
-     • пустые строки игнорируются;
-     • метка — строка вида «имя:» (можно с командой после двоеточия);
-     • директива «.page N» — дальше собирать на страницу N (адрес внутри
-       страницы снова начинается с 00, промежутки забиваются НОП);
-     • адрес прямо числом: «05» — команда «безусловный переход на 05»;
-     • двухбайтная команда «.XX» — записать байт XX в ячейку как есть.
+    <div class="tempo study-only" id="tempoRow">
+      <span>Темп</span>
+      <select id="tempo" aria-label="Темп автоматического шага">
+        <option value="1">1 с</option>
+        <option value="2" selected>2 с</option>
+        <option value="5">5 с</option>
+        <option value="10">10 с</option>
+        <option value="0">вручную</option>
+      </select>
+    </div>
 
-   ЧЕГО АССЕМБЛЕР НЕ ДЕЛАЕТ
+    <div class="status study-only" id="status"></div>
 
-   Не проверяет логику программы и не исполняет её: собрал, положил,
-   дальше «Пуск» в интерфейсе. И не угадывает: если строка непонятна,
-   это ошибка с номером строки, а не «пропустим и поедем дальше».
+    <div class="tabs study-only" id="tabs">
+      <button type="button" data-tab="num">Числа</button>
+      <button type="button" data-tab="regs">Регистры</button>
+      <button type="button" data-tab="code">Код</button>
+      <button type="button" data-tab="log">Журнал</button>
+    </div>
 
-   ПРАВКА v2 (25.11.2026)
+    <div class="tabpane study-only" id="tabNum">
+      <div class="stack" id="stack"></div>
+    </div>
 
-   Строка из нескольких цифр («42») раньше считалась одной неизвестной
-   командой — теперь она разворачивается в столько команд-цифр, сколько
-   знаков в числе, как если бы их нажали по одной. Это понадобилось
-   примеру межбанка в панели редактора: 42 набирается двумя строками
-   «4» и «2», ровно как двумя клавишами.
+    <div class="tabpane regs study-only" id="tabRegs"></div>
 
-   ПРАВКА v3 (25.11.2026) — адреса через профиль модели
+    <div class="tabpane study-only" id="tabCode">
+      <div class="prog" id="prog"></div>
+    </div>
 
-   Адрес перехода теперь считается по профилю (профили Б3-34, МК-51
-   и МК-61 различаются длиной памяти и кодировкой), а не по зашитым
-   числам: иначе ассемблер и ядро расходились бы на другой модели.
+    <div class="tabpane study-only" id="tabLog">
+      <div class="logbox">
+        <div class="loghead">
+          <span>Журнал шагов · <b id="logCount">0</b></span>
+          <button type="button" id="logClear">Очистить</button>
+        </div>
+        <div class="log" id="log"></div>
+      </div>
+    </div>
 
-   ПРАВКА v4 (25.11.2026) — «42» и «-0»…«-4»
+    <div class="hint" id="hint">Готово. Клавиша f открывает второй слой, k — слой К: K-функции и косвенные команды МК-61.</div>
+  </div>
 
-   Подтверждённое живым прогоном: строка «42» разворачивается
-   в команды-цифры. Плюс в тексте принимаются отрицательные номера
-   регистров записи «-0»…«-4» — так их подписывают на корпусе.
+  <div class="modeseg" id="modeseg">
+    <button type="button" data-mode="work">Работа</button>
+    <button type="button" data-mode="study">Учёба</button>
+  </div>
 
-   ПРАВКА v5 (25.11.2026) — «.page N» и ошибки вместо догадок
+  <div class="foot">
+    <a href="tests.html?v=14">Проверка ядра МК-61</a> ·
+    <a href="tests-banks.html?v=4">Проверка банков и страниц</a> ·
+    <a href="tests-library.html?v=2">Проверка библиотеки</a> ·
+    <a href="tests-ext.html?v=16">Проверка расширения</a> ·
+    <a href="tests-disasm.html?v=12">Проверка декодера</a> ·
+    <a href="tests-asm.html?v=2">Проверка ассемблера</a> ·
+    <a href="tests-editor.html?v=4">Проверка редактора</a> ·
+    <a href="tests-run.html?v=1">Проверка прогонов</a>
+  </div>
+</div>
 
-   Директива «.page N» переводит сборку на страницу N: адрес внутри
-   страницы снова с 00, промежутки между страницами забиваются НОП.
-   Метки стали абсолютными (страница × pageSize + адрес), чтобы переход
-   на метку с другой страницы можно было распознать и запретить
-   с подсказкой про F0 2n — молча перепрыгнуть страницу нельзя.
+<div class="shelf" id="shelf" hidden>
+  <div class="shelf-card">
+    <div class="shelf-head">
+      <span>Программы</span>
+      <button type="button" id="shelfClose" aria-label="Закрыть">✕</button>
+    </div>
+    <div class="shelf-tools">
+      <button type="button" id="shelfSave">＋ Сохранить текущую</button>
+      <button type="button" id="shelfExport">⇩ В файл</button>
+      <button type="button" id="shelfImport">⇧ Из файла</button>
+      <input type="file" id="shelfFile" accept=".json,application/json" hidden>
+    </div>
+    <div class="shelf-list" id="shelfList"></div>
+  </div>
+</div>
 
-   «F0» без второго байта — теперь ошибка, а не две нулевые ячейки:
-   раньше опечатка в примере расширения давала тихо испорченную память.
+<script>
+(function () {
+  var KEY = 'pmk61/theme';
+  var ORDER = ['classic', 'light', 'dark'];
+  var ICON = { classic: '▤', light: '☀', dark: '☾' };
+  var NAME = { classic: 'классика — бежевый корпус', light: 'светлая', dark: 'тёмная' };
+  var META = { classic: '#d7d3c4', light: '#eef1f6', dark: '#15181b' };
+  var btn = document.getElementById('themeBtn');
+  var meta = document.querySelector('meta[name="theme-color"]');
 
-   Переполнение памяти сообщает номер строки, а не просто «не влезло».
-   ========================================================= */
-(function (global) {
-  'use strict';
-
-  var NOP = 0x54;
-  var DEFAULT_PAGE = 105;
-  var DEFAULT_PAGES = 1;
-
-  /* ---------- профиль модели ---------- */
-
-  /* Длина памяти и кодировка берутся у профиля, если он подключён.
-     Без профиля работаем как на МК-61: 105 ячеек, одна страница. */
-  function profile(opts) {
-    var o = opts || {};
-    var p = o.profile || null;
-    var pageSize = (o.pageSize > 0) ? Math.round(o.pageSize)
-                 : (p && p.pageSize > 0) ? p.pageSize : DEFAULT_PAGE;
-    var pages = (o.pages > 0) ? Math.round(o.pages)
-              : (p && p.pages > 0) ? p.pages : DEFAULT_PAGES;
-    if (o.maxCells > 0) {
-      pages = Math.max(1, Math.ceil(o.maxCells / pageSize));
-    }
-    return { pageSize: pageSize, pages: pages, len: pageSize * pages };
+  function apply(theme) {
+    if (ORDER.indexOf(theme) < 0) theme = 'classic';
+    document.body.dataset.theme = theme;
+    btn.textContent = ICON[theme];
+    btn.title = 'Тема: ' + NAME[theme] + ' — нажми, чтобы сменить';
+    if (meta) meta.setAttribute('content', META[theme]);
+    try { localStorage.setItem(KEY, theme); } catch (e) {}
   }
 
-  /* ---------- команды ---------- */
+  var saved = null;
+  try { saved = localStorage.getItem(KEY); } catch (e) {}
+  apply(saved && ORDER.indexOf(saved) >= 0 ? saved : 'classic');
 
-  /* Таблица имён → код. Берётся у ядра (MKCore.CMD), а если ядра нет —
-     из минимального набора ниже. Держать полный список здесь нельзя:
-     он разъедется с core.js при первой же правке кодировки. */
-  function cmdTable() {
-    var core = global.MKCore;
-    if (core && core.CMD) return core.CMD;
-    return null;
+  btn.addEventListener('click', function () {
+    var cur = document.body.dataset.theme || 'classic';
+    var i = ORDER.indexOf(cur);
+    apply(ORDER[(i + 1) % ORDER.length]);
+  });
+})();
+</script>
+
+<!-- ПОРЯДОК ПОДКЛЮЧЕНИЯ ВАЖЕН.
+
+     1. core.js → profiles.js: база ядра и коды команд.
+     2. ext61.js → disasm61.js: расширение и декодер (ядро и листинг).
+     3. profiles-ui.js: раскладки и список моделей, в т. ч. «МК-61 (расширенный)».
+     4. ext61-boot.js: ПОСЛЕ раскладок и ДО ui.js — он смотрит выбранную
+        модель, отдаёт ui.js настоящее ядро и перехватывает кнопку F0,
+        возвращая клавиатуру на цифровой слой.
+     5. ui.js → shelf.js → ext61-ui.js → ext61-regs-click.js:
+        интерфейс, библиотека, панель F0 с банком и журналом переходов,
+        регистры: одно касание — показать, двойное — записать X.
+     6. asm61.js → asm-editor.js: ассемблер и панель редактора на вкладке
+        «Код». Панель вставляет себя ПЕРЕД #prog и никогда внутрь: там
+        renderProgram() из ui.js делает innerHTML = '', и всё вложенное
+        исчезло бы при первой перерисовке. Тот же приём, что у панели банков.
+
+     ВАЖНО: версии у всех скриптов поднимаются ВМЕСТЕ. Если поднять один
+     файл и забыть другой, браузер отдаст старый скрипт из кэша — и
+     разъедется всё: панель банков (живёт в ext61-ui.js и вставляется
+     ПЕРЕД #tabRegs, а не внутрь — иначе её сносит renderRegs из ui.js),
+     декодер и обработчик кликов по регистрам. -->
+<script src="core.js?v=14"></script>
+<script src="profiles.js?v=14"></script>
+<script src="ext61.js?v=12"></script>
+<script src="disasm61.js?v=8"></script>
+
+<script src="profiles-ui.js?v=3"></script>
+<script src="ext61-boot.js?v=10"></script>
+<script src="ui.js?v=4"></script>
+<script src="shelf.js?v=5"></script>
+<script src="ext61-ui.js?v=10"></script>
+<script src="ext61-regs-click.js?v=4"></script>
+<script src="asm61.js?v=5"></script>
+<script src="asm-editor.js?v=14"></script>
+
+<script>
+/* Переключатель угла Р-ГРД-Г — как в 34-й:
+   ui.js про угол ничего не знает, ядро отдаёт setAngle/getAngle,
+   здесь только кнопки и память. */
+(function () {
+  var KEY = 'pmk61/angle';
+  var MARK = { deg: 'Г', grad: 'ГРД', rad: 'Р' };
+  var WORD = { deg: 'градусы', grad: 'грады', rad: 'радианы' };
+  var seg = document.getElementById('angseg');
+  var mark = document.getElementById('stAngle');
+  var cur = 'deg';
+  if (!seg) return;
+
+  function core() {
+    return (window.MKUI && window.MKUI.getCore) ? window.MKUI.getCore() : null;
   }
 
-  function regNum(s) {
-    if (s === null || typeof s === 'undefined') return -1;
-    var t = String(s).trim();
-    if (!t) return -1;
-    if (t.charAt(0) === '-') {
-      var neg = parseInt(t.slice(1), 10);
-      if (!isFinite(neg) || neg < 0 || neg > 4) return -1;
-      return neg + 10;
-    }
-    var n = parseInt(t, 10);
-    if (!isFinite(n) || n < 0 || n > 15) return -1;
-    return n;
+  function paint() {
+    Array.prototype.forEach.call(seg.querySelectorAll('button'), function (b) {
+      b.classList.toggle('on', b.dataset.angle === cur);
+    });
+    if (mark) mark.textContent = MARK[cur];
+    seg.title = 'Угол: ' + WORD[cur];
   }
 
-  /* Разбор одной строки на «команду + аргумент».
-
-     Возвращает {kind, name, arg, page} или null для пустой строки
-     и комментария; ошибка — {err}. */
-  function tokenize(line) {
-    var s = String(line == null ? '' : line);
-
-    /* Комментарий отрезаем до trim: « ; 7!» — тоже комментарий. */
-    var cut = s.length;
-    var sc = s.indexOf(';');
-    var hc = s.indexOf('#');
-    if (sc >= 0 && sc < cut) cut = sc;
-    if (hc >= 0 && hc < cut) cut = hc;
-    s = s.slice(0, cut);
-
-    s = s.trim();
-    if (!s) return null;
-
-    /* Метка: «имя:» в начале строки. После двоеточия может стоять
-       команда — тогда она относится к этой же строке. */
-    var label = null;
-    var m = /^([A-Za-zА-Яа-я_][A-Za-zА-Яа-я0-9_]*):\s*/.exec(s);
-    if (m) {
-      label = m[1];
-      s = s.slice(m[0].length).trim();
+  function apply(mode, silent) {
+    if (!MARK[mode]) mode = 'deg';
+    cur = mode;
+    try { localStorage.setItem(KEY, mode); } catch (e) {}
+    var c = core();
+    if (c && c.setAngle) c.setAngle(mode);
+    paint();
+    if (!silent && window.MKUI && window.MKUI.hint) {
+      window.MKUI.hint('Угол: ' + WORD[mode] + ' — sin, cos, tg и обратные считаются в этих единицах');
     }
-
-    if (!s) return { kind: 'label', label: label };
-
-    /* Директива «.page N». */
-    var pd = /^\.page\s+(-?\d+)$/i.exec(s);
-    if (pd) {
-      return { kind: 'page', label: label, page: parseInt(pd[1], 10) };
-    }
-
-    /* Двухбайтная запись «.XX» — байт как есть. */
-    var hd = /^\.([0-9A-Fa-f]{2})$/.exec(s);
-    if (hd) {
-      return { kind: 'byte', label: label, arg: parseInt(hd[1], 16) };
-    }
-
-    /* Одно число: адрес перехода или цифра-команда — разберём позже,
-       когда будет известна разрядность. */
-    if (/^-?\d+$/.test(s)) {
-      return { kind: 'num', label: label, arg: s };
-    }
-
-    /* Команда с аргументом: «X→П 0», «F L0 loop», «БП 07», «F0 24». */
-    var parts = s.split(/\s+/);
-    var name = parts[0];
-    var arg = parts.length > 1 ? parts.slice(1).join(' ') : null;
-    return { kind: 'cmd', label: label, name: name, arg: arg };
   }
 
-  /* Сколько ячеек занимает команда: F0 и переходы — две. */
-  function widthOf(tok) {
-    if (!tok) return 0;
-    if (tok.kind === 'byte') return 1;
-    if (tok.kind === 'page') return 0;
-    if (tok.kind === 'num') {
-      var t = String(tok.arg);
-      if (t.charAt(0) === '-') return 1;
-      return t.length;
-    }
-    if (tok.kind === 'cmd') {
-      var n = String(tok.name).toUpperCase();
-      if (n === 'F0') return 2;
-      if (n === 'БП' || n === 'ПП' || n === 'F' || n === 'FL0' || n === 'FL1' ||
-          n === 'FL2' || n === 'FL3' || n === 'FX≠0' || n === 'FX=0') {
-        return 2;
-      }
-    }
-    return 1;
+  var saved = null;
+  try { saved = localStorage.getItem(KEY); } catch (e) {}
+  apply(saved && MARK[saved] ? saved : 'deg', true);
+
+  seg.addEventListener('click', function (e) {
+    var b = e.target.closest('button[data-angle]');
+    if (b) apply(b.dataset.angle);
+  });
+
+  var model = document.getElementById('model');
+  if (model) {
+    model.addEventListener('change', function () {
+      setTimeout(function () { apply(cur, true); }, 0);
+    });
   }
-
-  /* Код команды по имени — через таблицу ядра, если она есть. */
-  function codeOf(name) {
-    var table = cmdTable();
-    if (!table) return null;
-    var up = String(name).toUpperCase();
-    if (typeof table[up] === 'number') return table[up];
-    if (typeof table[name] === 'number') return table[name];
-    return null;
-  }
-
-  /* ---------- сборка ---------- */
-
-  /* Главная функция. Два прохода:
-       первый — адреса и метки (сколько ячеек занимает каждая строка);
-       второй — запись кодов с подстановкой адресов меток.
-
-     Возвращает {ok, cells, labels, count, errors}.
-     cells — массив {addr, code, second, line}: code — первый байт,
-     second — второй байт или null. toProgram из этого делает плоский
-     массив для ядра. */
-  function assemble(text, opts) {
-    var prof = profile(opts);
-    var lines = String(text == null ? '' : text).split(/\r?\n/);
-    var errors = [];
-    var toks = [];
-    var i, t;
-
-    /* Разбор и проверка имён команд — до подсчёта адресов: иначе
-       неизвестная команда съест ячейку и все адреса после неё съедут. */
-    for (i = 0; i < lines.length; i++) {
-      t = tokenize(lines[i]);
-      if (t) {
-        t.line = i + 1;
-        toks.push(t);
-      }
-    }
-
-    /* Первый проход: адрес и метки. */
-    var addr = 0;
-    var page = 0;
-    var labels = {};
-    var planned = [];
-
-    for (i = 0; i < toks.length; i++) {
-      t = toks[i];
-
-      if (t.kind === 'page') {
-        if (!isFinite(t.page) || t.page < 0) {
-          errors.push({ line: t.line, msg: '«.page» ждёт номер страницы: 0, 1, 2…' });
-          continue;
-        }
-        if (t.page >= prof.pages) {
-          errors.push({ line: t.line, msg: 'страница ' + t.page + ' не существует: их ' + prof.pages });
-          continue;
-        }
-        page = t.page;
-        addr = page * prof.pageSize;
-        continue;
-      }
-
-      if (addr >= prof.len) {
-        errors.push({ line: t.line, msg: 'переполнение памяти: ' + prof.len + ' ячеек уже заняты' });
-        break;
-      }
-
-      if (t.label) {
-        if (labels[t.label] !== undefined) {
-          errors.push({ line: t.line, msg: 'метка «' + t.label + '» уже была на строке ' +
-            labels[t.label].line });
-        } else {
-          labels[t.label] = { addr: addr, page: page, line: t.line };
-        }
-      }
-
-      var w = widthOf(t);
-      if (w > 0 && addr + w > prof.len) {
-        errors.push({ line: t.line, msg: 'команда не влезает: до конца памяти ' +
-          (prof.len - addr) + ' яч., нужно ' + w });
-        break;
-      }
-
-      planned.push({ tok: t, addr: addr, page: page });
-      addr += w;
-    }
-
-    /* Второй проход: коды. */
-    var cells = [];
-    var used = 0;
-
-    for (i = 0; i < planned.length; i++) {
-      var pl = planned[i];
-      t = pl.tok;
-
-      if (t.kind === 'num') {
-        var s = String(t.arg);
-        if (s.charAt(0) === '-') {
-          /* Отрицательное число — это команда смены знака. */
-          var c = codeOf('/-');
-          if (c === null) {
-            errors.push({ line: t.line, msg: 'команда «/-» (смена знака) не найдена в ядре' });
-            continue;
-          }
-          cells.push({ addr: pl.addr, code: c, second: null, line: t.line });
-          used++;
-        } else {
-          /* Цифры по одной, как клавишами. */
-          for (var d = 0; d < s.length; d++) {
-            var cc = codeOf(s.charAt(d));
-            if (cc === null) {
-              errors.push({ line: t.line, msg: 'цифры «' + s.charAt(d) + '» нет в ядре' });
-              break;
-            }
-            cells.push({ addr: pl.addr + d, code: cc, second: null, line: t.line });
-            used++;
-          }
-        }
-        continue;
-      }
-
-      if (t.kind === 'byte') {
-        cells.push({ addr: pl.addr, code: t.arg & 0xFF, second: null, line: t.line });
-        used++;
-        continue;
-      }
-
-      if (t.kind === 'cmd') {
-        var code = codeOf(t.name);
-        if (code === null) {
-          errors.push({ line: t.line, msg: 'Неизвестная команда: ' + t.name });
-          continue;
-        }
-
-        var up = String(t.name).toUpperCase();
-        var second = null;
-
-        if (up === 'F0') {
-          if (!t.arg || !/^[0-9A-Fa-f]{2}$/.test(t.arg)) {
-            errors.push({ line: t.line, msg: 'после F0 нужен второй байт: F0 24 (две hex-цифры)' });
-            continue;
-          }
-          second = parseInt(t.arg, 16);
-        } else if (t.arg) {
-          /* Аргумент: метка, адрес или номер регистра. */
-          if (labels[t.arg] !== undefined) {
-            var lab = labels[t.arg];
-            if (lab.page !== pl.page) {
-              errors.push({ line: t.line, msg: 'метка «' + t.arg + '» на другой странице (' +
-                lab.page + '): переход между страницами — через F0 2' + lab.page });
-              continue;
-            }
-            second = lab.addr % prof.pageSize;
-          } else if (/^-?\d+$/.test(t.arg)) {
-            second = parseInt(t.arg, 10);
-          } else {
-            var r = regNum(t.arg);
-            if (r >= 0) second = r;
-            else {
-              errors.push({ line: t.line, msg: '«' + t.arg + '» — не метка, не адрес и не регистр' });
-              continue;
-            }
-          }
-        }
-
-        cells.push({ addr: pl.addr, code: code, second: second, line: t.line });
-        used++;
-        if (second !== null) used++;
-        continue;
-      }
-    }
-
-    if (errors.length) {
-      return { ok: false, cells: cells, labels: labels, count: used, errors: errors };
-    }
-
-    return { ok: true, cells: cells, labels: labels, count: used, errors: [] };
-  }
-
-  /* Ячейки → массив кодов для ядра.
-
-     Каждая ячейка — один байт: первый байт команды и, если был, второй.
-     Хвост до длины памяти забивается НОП, чтобы ядро не читало мусор
-     за концом программы. */
-  function toProgram(cells, opts) {
-    var prof = profile(opts);
-    var prog = new Array(prof.len);
-    for (var i = 0; i < prof.len; i++) prog[i] = NOP;
-
-    if (!Array.isArray(cells)) return prog;
-
-    for (var j = 0; j < cells.length; j++) {
-      var c = cells[j];
-      if (!c) continue;
-      if (c.addr >= 0 && c.addr < prog.length) prog[c.addr] = c.code & 0xFF;
-      if (c.second !== null && typeof c.second !== 'undefined') {
-        var a2 = c.addr + 1;
-        if (a2 >= 0 && a2 < prog.length) prog[a2] = c.second & 0xFF;
-      }
-    }
-    return prog;
-  }
-
-  global.MKAsm = {
-    assemble: assemble,
-    toProgram: toProgram,
-    tokenize: tokenize,
-    widthOf: widthOf,
-    regNum: regNum,
-    profile: profile,
-    NOP: NOP
-  };
-})(typeof window !== 'undefined' ? window : this);
+})();
+</script>
+</body>
+</html>
